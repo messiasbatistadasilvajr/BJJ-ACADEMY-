@@ -1,100 +1,182 @@
-# 🥋 BJJ Academy SaaS — Gestão Inteligente para Academias e Escolas de Jiu-Jitsu
+# 🥋 BJJ-Enterprise v1.0 — Enterprise SaaS Platform for Brazilian Jiu-Jitsu Academies & Franchises
 
-Plataforma completa de gestão de academias de Brazilian Jiu-Jitsu e artes marciais com arquitetura **Multi-Tenant**, integração financeira com **Split de Pagamentos / Asaas (PIX, Boleto e Cartão)**, **Chamada por Foto do Tatame com IA (Gemini Vision)**, **AI Coach & Prevenção de Churn**, **CRM de Captação** e **Aplicativo Mobile do Aluno**.
-
----
-
-## 🌟 Funcionalidades Principais
-
-### 1. 🏢 Arquitetura Multi-Tenant & Gestão Multi-Unidades
-- **Isolamento Completo:** Alterne instantaneamente entre a visão Master (Super Admin) e filiais/unidades individuais.
-- **Gestão de Unidades:** Cadastro de academias, dados cadastrais, endereço, instrutores responsáveis, capacidade e métricas financeiras segregadas por unidade.
-- **Cadastro Centralizado de Alunos e Professores:** Perfis completos com foto, faixa atual, graus, categoria (Kids, Adulto, Master), plano contratado e histórico de treinos.
-
-### 2. 📸 Chamada por Foto com Gemini Vision AI
-- **Reconhecimento em Lote no Tatame:** Faça o upload ou capture a foto da turma reunida no tatame após o treino.
-- **Identificação Visual Inteligente:** O modelo **Gemini Vision AI** escaneia feições e faixas dos praticantes, cruzando com o cadastro da academia.
-- **Confirmação Instantânea:** Check-in em lote com 1 clique, atualizando a contagem de presenças e o histórico de frequência dos atletas.
-
-### 3. 💳 Módulo Financeiro Completo & Split de Pagamentos (Asaas)
-- **Subcontas por Academia:** Arquitetura preparada para repasse automático e Split de pagamentos direto para a conta de cada unidade.
-- **Formas de Pagamento:**
-  - **PIX:** Geração instantânea de QR Code dinâmico e código Pix Copia e Cola.
-  - **Boleto Bancário:** Emissão e controle de compensação.
-  - **Cartão de Crédito:** Checkout e tokenização segura.
-- **Gestão de Inadimplência:** Cálculo automático de juros e multas por dia de atraso, com disparo de alertas de cobrança e renegociação via WhatsApp.
-- **Extrato & Relatórios:** Filtros por período, aluno, unidade, forma de pagamento e exportação de relatórios.
-
-### 4. 🥋 Gestão de Treinos, Grade Horária & Graduações
-- **Controle de Presença Diário:** Lista de presença por turma e horário com marcação rápida.
-- **Quadro de Graduação Automático:** Algoritmo calcula os atletas aptos para graduação de faixa e graus com base no tempo de prática e número de presenças no tatame.
-- **Currículo Técnico:** Biblioteca de posições (Passagens, Raspagens, Finalizações, Quedas) catalogadas por nível e faixa.
-
-### 5. 🤖 AI Coach & Prevenção Inteligente de Evasão (Churn)
-- **Algoritmo de Risco de Churn:** Identifica alunos com queda drástica de frequência nos últimos 30 dias.
-- **Plano de Estudos Personalizado:** IA analisa pontos fortes e vulnerabilidades do jogo do atleta e gera cronogramas de treino focados.
-- **Mensagens de Reengajamento:** Geração de mensagens humanizadas prontas para envio no WhatsApp do atleta.
-
-### 6. 🎯 CRM de Vendas & Funil de Aulas Experimentais
-- **Pipeline de Matrículas:** Acompanhamento de leads desde o primeiro contato, agendamento de aula experimental até a assinatura do plano.
-- **Métricas de Conversão:** Taxa de fechamento por canal de aquisição (Instagram, Indicação, Google, Parcerias).
-
-### 7. 📱 Simulador do Aplicativo Mobile do Aluno
-- **Carteirinha Digital:** QR Code de identificação do aluno com foto, faixa e validade do plano.
-- **Histórico de Treinos:** Linha do tempo de frequência e contagem regressiva para a próxima graduação.
-- **Pagamento Direto no App:** Aluno visualiza mensalidades abertas e paga na hora via PIX ou Cartão.
-
-### 8. 👨‍👩‍👧 Portal dos Pais (Turmas Kids)
-- **Acompanhamento Infantil:** Feedback sobre disciplina, foco, frequência e conquistas dos pequenos guerreiros.
+> **Plataforma Enterprise de Gestão Inteligente, Billing Recorrente com Split Asaas, Chamada por Visão Computacional (Gemini Vision) e Prevenção de Churn por IA para Academias e Redes de Jiu-Jitsu.**
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## 📑 Sumário
 
-| Camada | Tecnologia |
-|---|---|
-| **Frontend** | React 19, TypeScript, Tailwind CSS v4, Motion, Lucide React |
-| **Backend** | Node.js, Express, TSX, ESBuild |
-| **Inteligência Artificial** | Google GenAI SDK (`@google/genai`), Gemini 3.6 Flash & Vision |
-| **Bundler & Build** | Vite 6 |
-| **Estilos & UI** | Tailwind CSS v4 com design dark-mode esportivo moderno |
+- [1. Visão Geral da Arquitetura](#1-visão-geral-da-arquitetura)
+- [2. Arquitetura Multi-Tenant & Governança](#2-arquitetura-multi-tenant--governança)
+- [3. Módulo Financeiro & Integração Asaas (Split de Pagamentos)](#3-módulo-financeiro--integração-asaas-split-de-pagamentos)
+- [4. Capacidades da Plataforma](#4-capacidades-da-plataforma)
+  - [4.1 Gestão de Unidades & Academias](#41-gestão-de-unidades--academias)
+  - [4.2 Chamada por Foto com Gemini Vision AI](#42-chamada-por-foto-com-gemini-vision-ai)
+  - [4.3 AI Coach & Prevenção Inteligente de Evasão (Churn)](#43-ai-coach--prevenção-inteligente-de-evasão-churn)
+  - [4.4 CRM & Funil de Aulas Experimentais](#44-crm--funil-de-aulas-experimentais)
+  - [4.5 Gestão de Treinos & Sistema de Graduação](#45-gestão-de-treinos--sistema-de-graduação)
+  - [4.6 Aplicativo Mobile do Aluno](#46-aplicativo-mobile-do-aluno)
+  - [4.7 Portal dos Pais (Kids & Juvenil)](#47-portal-dos-pais-kids--juvenil)
+- [5. Tecnologias Utilizadas](#5-tecnologias-utilizadas)
+- [6. Configuração do Ambiente & Execução](#6-configuração-do-ambiente--execução)
+- [7. Endpoints da API Backend (`server.ts`)](#7-endpoints-da-api-backend-serverts)
+- [8. Exportação & Sincronização com o GitHub](#8-exportação--sincronização-com-o-github)
 
 ---
 
-## 🚀 Como Executar o Projeto Localmente
+## 1. Visão Geral da Arquitetura
+
+O **BJJ-Enterprise v1.0** foi projetado para atender tanto academias individuais quanto grandes redes e franquias de artes marciais. O sistema desacopla a camada de apresentação, a lógica de negócios e os serviços de inteligência artificial através de microsserviços e rotas de backend dedicadas.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           BJJ-ENTERPRISE v1.0                           │
+│     (React 19 + TypeScript + Tailwind CSS v4 + Motion + Lucide)         │
+└────────────────────────────────────┬────────────────────────────────────┘
+                                     │
+         ┌───────────────────────────┼───────────────────────────┐
+         ▼                           ▼                           ▼
+┌──────────────────┐       ┌──────────────────┐       ┌──────────────────┐
+│   Multi-Tenant   │       │ Módulo Financeiro│       │  Motor Gemini AI │
+│   & Unidades     │       │ (Asaas / Split)  │       │ (Vision & Coach) │
+└──────────────────┘       └──────────────────┘       └──────────────────┘
+```
+
+---
+
+## 2. Arquitetura Multi-Tenant & Governança
+
+A estrutura do BJJ-Enterprise garante o **isolamento lógico completo** entre diferentes unidades ou franquias:
+
+- **Identificadores de Tenant:** Todos os registros de alunos, instrutores, turmas, cobranças e históricos possuem indexação por `tenantId` / `academyId`.
+- **Controle de Acesso RBAC (Role-Based Access Control):**
+  - **Super Admin (Master):** Acesso consolidado a todas as unidades, métricas globais de faturamento, retenção e taxas de conversão.
+  - **Gestor de Unidade (Filial):** Visualização restrita aos alunos, despesas, turmas e fluxo financeiro da sua própria academia.
+  - **Instrutores & Professores:** Acesso à lista de chamada, graduações, currículo técnico e portal kids.
+  - **Alunos:** Interface mobile dedicada com carteirinha, histórico de treinos e pagamento de mensalidades.
+
+---
+
+## 3. Módulo Financeiro & Integração Asaas (Split de Pagamentos)
+
+O BJJ-Enterprise opera como um hub financeiro completo, projetado no modelo de **Subcontas e Split de Pagamentos**:
+
+```
+                         BJJ ENTERPRISE SAAS
+                                 │
+                 ┌───────────────┴───────────────┐
+                 │                               │
+            Academia A                      Academia B
+          (Subconta A)                    (Subconta B)
+                 │                               │
+            Alunos A                        Alunos B
+                 │                               │
+           Cobranças PIX/Cartão            Cobranças PIX/Cartão
+                 │                               │
+                 └───────────────┬───────────────┘
+                                 ▼
+                     Gateway Asaas / PSP
+                                 │
+                   Processamento & Validação
+                                 │
+                    Repasse Automático Líquido
+```
+
+### Principais Características Financeiras:
+1. **Métodos de Cobrança:**
+   - **PIX Dinâmico:** Geração de QR Code dinâmico e código Pix Copia e Cola instantâneo com conciliação automática.
+   - **Boleto Bancário:** Registro e compensação bancária automática.
+   - **Cartão de Crédito:** Tokenização segura via gateway (sem armazenamento de dados sensíveis de cartão no banco local).
+2. **Split de Pagamentos & Repasses:**
+   - Cálculo no backend da taxa da plataforma e repasse líquido direto para a subconta da academia.
+3. **Gestão de Inadimplência Automatizada:**
+   - Cálculo de multas percentuais e juros diários por dia de atraso.
+   - Disparo de notificações de lembrete e cobrança com links de pagamento via WhatsApp.
+4. **Webhooks Idempotentes:**
+   - Tratamento com identificador único (`eventId` + `provider`) para evitar processamento duplicado de pagamentos ou estornos.
+5. **Extrato Financeiro & Conciliação:**
+   - Filtros por período, aluno, unidade, forma de pagamento e exportação de relatórios em CSV/PDF.
+
+---
+
+## 4. Capacidades da Plataforma
+
+### 4.1 Gestão de Unidades & Academias
+- Painel para cadastrar matrizes e filiais com capacidade de tatame, quadro de professores e métricas de desempenho.
+- Configuração de planos (Mensal, Trimestral, Semestral, Anual) específicos por unidade.
+
+### 4.2 Chamada por Foto com Gemini Vision AI
+- **Chamada Automatizada:** O professor faz uma foto da turma no tatame ao final da aula.
+- O modelo **Gemini Vision** analisa a imagem, detecta os atletas presentes e identifica as cores das faixas.
+- Confirmação de presença em lote com 1 clique, atualizando o histórico do aluno e os requisitos de graduação.
+
+### 4.3 AI Coach & Prevenção Inteligente de Evasão (Churn)
+- **Prevenção de Evasão:** Algoritmo preditivo que monitora o declínio de presenças nos últimos 30 dias e sugere ações imediatas de reengajamento.
+- **Plano de Estudos Personalizado:** IA analisa pontos fracos do atleta (ex: guarda, passagens, defesa) e cria rotinas técnicas sob medida.
+
+### 4.4 CRM & Funil de Aulas Experimentais
+- Pipeline visual no estilo Kanban para acompanhar potenciais alunos (Leads) desde o primeiro contato até a matrícula.
+- Automação de lembretes para agendamento de aulas experimentais.
+
+### 4.5 Gestão de Treinos & Sistema de Graduação
+- Registro de turmas por nível (Iniciante, Avançado, No-Gi, Competição, Kids).
+- Algoritmo que calcula automaticamente a elegibilidade para novas faixas e graus com base em dias de treino e tempo de prática.
+- Currículo técnico com biblioteca de posições catalogadas.
+
+### 4.6 Aplicativo Mobile do Aluno
+- Carteirinha digital com QR Code para acesso e check-in.
+- Linha do tempo de frequência e contagem de presenças para o próximo grau.
+- Pagamento de mensalidades pendentes diretamente pelo celular.
+
+### 4.7 Portal dos Pais (Kids & Juvenil)
+- Canal dedicado para pais e responsáveis acompanharem o desenvolvimento, pontualidade, disciplina e evolução marcial dos filhos.
+
+---
+
+## 5. Tecnologias Utilizadas
+
+| Camada | Tecnologia | Descrição |
+|---|---|---|
+| **Frontend Framework** | React 19 + TypeScript | Interface reativa e fortemente tipada |
+| **Estilos & UI** | Tailwind CSS v4 | Estilização utilitária de alta performance |
+| **Animações** | Motion (`motion/react`) | Transições fluidas e microinterações |
+| **Ícones** | Lucide React | Conjunto moderno de ícones vetoriais |
+| **Backend & Servidor** | Node.js + Express + TSX | Servidor de desenvolvimento e API em tempo real |
+| **Inteligência Artificial** | `@google/genai` (Gemini 3.6 Flash / Vision) | Visão computacional e AI Coach |
+| **Build & Bundling** | Vite 6 + ESBuild | Compilação otimizada para containers |
+
+---
+
+## 6. Configuração do Ambiente & Execução
 
 ### Pré-requisitos
 - **Node.js** 18 ou superior instalado.
-- **NPM** ou gerenciador de pacotes equivalente.
+- **NPM** instalado.
 
-### 1. Clonar o Repositório
+### 1. Clonar e Instalar
 ```bash
-git clone https://github.com/seu-usuario/bjj-academy-saas.git
-cd bjj-academy-saas
-```
-
-### 2. Instalar Dependências
-```bash
+git clone https://github.com/seu-usuario/bjj-enterprise.git
+cd bjj-enterprise
 npm install
 ```
 
-### 3. Configurar Variáveis de Ambiente
-Crie ou edite o arquivo `.env` na raiz do projeto:
+### 2. Configurar Variáveis de Ambiente
+Crie um arquivo `.env` na raiz do projeto com base no `.env.example`:
 ```env
-# Chave da API do Google Gemini (para recursos de IA e Visão Computacional)
+# Chave da API Gemini (Google AI Studio)
 GEMINI_API_KEY=sua_chave_gemini_aqui
 
-# Porta padrão de execução
+# Porta do servidor (padrão 3000)
 PORT=3000
 ```
 
-### 4. Executar em Modo de Desenvolvimento
+### 3. Iniciar em Desenvolvimento
 ```bash
 npm run dev
 ```
-O servidor iniciará em `http://localhost:3000`.
+Acesse a aplicação em `http://localhost:3000`.
 
-### 5. Compilar para Produção
+### 4. Build de Produção
 ```bash
 npm run build
 npm start
@@ -102,51 +184,23 @@ npm start
 
 ---
 
-## 📁 Estrutura de Pastas
+## 7. Endpoints da API Backend (`server.ts`)
 
-```
-├── .env.example                 # Exemplo de variáveis de ambiente
-├── AGENTS.md                    # Diretrizes do sistema e roadmap de inovação
-├── metadata.json                # Metadados e permissões da aplicação
-├── package.json                 # Dependências e scripts
-├── server.ts                    # Backend Express & Rotas de API Gemini
-├── src/
-│   ├── main.tsx                 # Ponto de entrada React
-│   ├── App.tsx                  # Estrutura principal e gerenciador de estado global
-│   ├── index.css                # Estilos globais e Tailwind CSS
-│   ├── types.ts                 # Tipagens e interfaces TypeScript
-│   ├── data.ts                  # Mock data inicial para testes multi-tenant
-│   └── components/
-│       ├── AcademyManager.tsx       # Gestão de Academias e Unidades
-│       ├── AiCoachView.tsx          # AI Coach & Análise Preditiva de Churn
-│       ├── CrmMarketingView.tsx     # Funil de Vendas de Aulas Experimentais
-│       ├── DashboardView.tsx        # Dashboard Executivo com KPIs
-│       ├── FinanceView.tsx          # Gestão Financeira, PIX, Asaas & Split
-│       ├── MobileSimulator.tsx      # App Mobile do Aluno
-│       ├── ParentsPortal.tsx        # Portal dos Pais e Turma Kids
-│       ├── PhotoAttendanceModal.tsx # Modal de Chamada por Foto com Gemini Vision
-│       ├── StudentRegistrationModal.tsx # Cadastro de Alunos
-│       └── TrainingManager.tsx      # Treinos, Chamada e Graduações
-```
+- `POST /api/ai/coach` — Análise técnica e plano de estudos personalizado via Gemini.
+- `POST /api/ai/photo-attendance` — Reconhecimento visual em lote de atletas no tatame.
+- `GET /api/health` — Verificação de status e integridade do servidor.
 
 ---
 
-## 🔌 Principais Endpoints da API Backend (`server.ts`)
+## 8. Exportação & Sincronização com o GitHub
 
-- `POST /api/ai/coach` — Análise de treino, sugestão de currículo e estudo personalizado via Gemini.
-- `POST /api/ai/photo-attendance` — Processamento de fotos do tatame para reconhecimento de alunos e faixas.
-- `GET /api/health` — Verificação de saúde da aplicação.
+Para sincronizar este projeto com seu repositório no **GitHub**:
 
----
-
-## 🔮 Roadmap de Inovações Futuras
-
-- [ ] **Integração de Catraca & Câmera IP:** Check-in por reconhecimento facial em tempo real na recepção.
-- [ ] **WhatsApp Bot Automatizado:** Atendimento inteligente para agendamento de aulas experimentais 24/7.
-- [ ] **Passaporte BJJ:** Check-in via QR Code para alunos treinarem em academias conveniadas e filiais durante viagens.
-- [ ] **Gamificação & Badges:** Conquistas por consistência ("100 Treinos no Ano", "Mestre da Guarda").
+1. No painel superior do **Google AI Studio**, clique no menu de opções (ícone de engrenagem ou botão **Export**).
+2. Selecione **Export to GitHub** (ou baixe como **ZIP** caso queira subir manualmente).
+3. Autorize sua conta do GitHub para criar o repositório e sincronizar todos os commits e arquivos (`README.md`, `server.ts`, `src/`, `AGENTS.md`, etc.).
 
 ---
 
 ## 📄 Licença
-Distribuído sob a licença **MIT**. Consulte `LICENSE` para mais informações.
+Projeto distribuído sob a licença **MIT**.
