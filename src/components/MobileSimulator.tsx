@@ -1,10 +1,10 @@
 import React, { useState } from "react";
-import { Student, PaymentHistory, Academy, ClassSchedule } from "../types";
+import { Student, PaymentHistory, Academy, ClassSchedule, AcademyPost } from "../types";
 import { 
   Award, QrCode, ClipboardCheck, Bell, ChevronRight, 
   MapPin, CheckCircle, RefreshCw, AlertTriangle, ShieldCheck, X,
   FileText, CreditCard, Copy, Download, Check, ExternalLink, FileCheck,
-  Calendar, Trophy, Send, Smartphone, Maximize2, Minimize2, Clock, Users, Star, MessageSquare, CheckCircle2, Sparkles, Share2
+  Calendar, Trophy, Send, Smartphone, Maximize2, Minimize2, Clock, Users, Star, MessageSquare, CheckCircle2, Sparkles, Share2, Megaphone, Flame
 } from "lucide-react";
 
 interface MobileSimulatorProps {
@@ -12,9 +12,11 @@ interface MobileSimulatorProps {
   payments: PaymentHistory[];
   academies?: Academy[];
   schedules?: ClassSchedule[];
+  posts?: AcademyPost[];
   onCheckIn: (studentId: string) => void;
   onUpdateStudent?: (updated: Student) => void;
   onAddPayment?: (payment: Omit<PaymentHistory, "id">) => void;
+  onToggleInterest?: (postId: string, studentId: string) => void;
 }
 
 export default function MobileSimulator({
@@ -22,16 +24,19 @@ export default function MobileSimulator({
   payments,
   academies = [],
   schedules = [],
+  posts = [],
   onCheckIn,
   onUpdateStudent,
-  onAddPayment
+  onAddPayment,
+  onToggleInterest
 }: MobileSimulatorProps) {
   // Simulator View Mode: Smartphone frame vs Expanded
   const [frameMode, setFrameMode] = useState<"smartphone" | "expanded">("smartphone");
 
   // Mobile active student selection
   const [activeStudentId, setActiveStudentId] = useState<string>(students[0]?.id || "");
-  const [mobileTab, setMobileTab] = useState<"card" | "schedule" | "study" | "payments" | "history">("card");
+  const [mobileTab, setMobileTab] = useState<"card" | "feed" | "schedule" | "study" | "payments" | "history">("card");
+  const [selectedPostFlyer, setSelectedPostFlyer] = useState<AcademyPost | null>(null);
   
   // Asaas Student Portal Actions State
   const [showPixModal, setShowPixModal] = useState(false);
@@ -65,6 +70,24 @@ export default function MobileSimulator({
   const activeStudentPayments = payments.filter(p => p.studentId === activeStudent.id);
   const activeStudentAcademy = academies.find(a => a.id === activeStudent.academyId);
   const academySchedules = schedules.filter(s => !activeStudent.academyId || s.academyId === activeStudent.academyId);
+  const activeAcademyPosts = posts.filter(p => !activeStudent.academyId || p.academyId === activeStudent.academyId);
+  const latestChampionship = activeAcademyPosts.find(p => p.pinned || p.category === "Campeonato") || activeAcademyPosts[0];
+
+  const handleStudentToggleInterest = (postId: string) => {
+    if (onToggleInterest) {
+      onToggleInterest(postId, activeStudent.id);
+    }
+    const post = posts.find(p => p.id === postId);
+    const isAlreadyInterested = post?.interestedStudentIds?.includes(activeStudent.id);
+    setMobileAlert({
+      title: isAlreadyInterested ? "Interesse Removido" : "Presença Confirmada!",
+      body: isAlreadyInterested 
+        ? `Sua confirmação no evento "${post?.title}" foi atualizada.` 
+        : `🔥 Sensacional! Sua confirmação para o evento "${post?.title}" foi registrada com sucesso!`,
+      type: "success"
+    });
+    setTimeout(() => setMobileAlert(null), 5000);
+  };
 
   const triggerMobileCheckIn = () => {
     if (activeStudent.paymentStatus === "Overdue") {

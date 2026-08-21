@@ -1,4 +1,4 @@
-import { Academy, Instructor, Student, Lead, ClassSchedule, PaymentHistory, Technique, GraduationCandidate, MarketingCampaign } from "./types";
+import { Academy, Instructor, Student, Lead, ClassSchedule, PaymentHistory, Technique, GraduationCandidate, MarketingCampaign, AcademyPost } from "./types";
 
 export const initialInstructors: Instructor[] = [
   {
@@ -40,6 +40,16 @@ export const initialInstructors: Instructor[] = [
     belt: "Black",
     birthDate: "1972-07-22", // Birthday is Tomorrow (July 22)
     status: "Active",
+  },
+  {
+    id: "inst-5",
+    academyId: "ac-4",
+    name: "Prof. Roberto Mendes",
+    email: "roberto@layoutjiujitsu.com.br",
+    phone: "+55 (11) 97123-9988",
+    belt: "Black",
+    birthDate: "1985-04-18",
+    status: "Active",
   }
 ];
 
@@ -52,6 +62,10 @@ export const initialAcademies: Academy[] = [
     monthlyRevenue: 18200,
     pendingGraduations: 12,
     instructorsCount: 5,
+    subdomain: "graciebarra",
+    customDomain: "gracie.bjjacademy.app.br",
+    asaasWalletId: "wal_gracie_991823901",
+    splitRatePercentage: 95
   },
   {
     id: "ac-2",
@@ -61,6 +75,10 @@ export const initialAcademies: Academy[] = [
     monthlyRevenue: 15400,
     pendingGraduations: 8,
     instructorsCount: 4,
+    subdomain: "alliance",
+    customDomain: "alliance.bjjacademy.app.br",
+    asaasWalletId: "wal_alliance_551829001",
+    splitRatePercentage: 95
   },
   {
     id: "ac-3",
@@ -70,7 +88,24 @@ export const initialAcademies: Academy[] = [
     monthlyRevenue: 13500,
     pendingGraduations: 15,
     instructorsCount: 3,
+    subdomain: "atos",
+    customDomain: "atos.bjjacademy.app.br",
+    asaasWalletId: "wal_atos_883921094",
+    splitRatePercentage: 95
   },
+  {
+    id: "ac-4",
+    name: "Layout Jiu-Jitsu",
+    unit: "Unidade Central - São Paulo",
+    activeStudents: 128,
+    monthlyRevenue: 19800,
+    pendingGraduations: 14,
+    instructorsCount: 4,
+    subdomain: "layout",
+    customDomain: "layout.bjjacademy.app.br",
+    asaasWalletId: "wal_layout_772910482",
+    splitRatePercentage: 95
+  }
 ];
 
 export const initialStudents: Student[] = [
@@ -215,6 +250,56 @@ export const initialStudents: Student[] = [
   },
   {
     id: "st-7",
+    academyId: "ac-4",
+    name: "Felipe Ramos (Layout BJJ)",
+    email: "felipe.ramos@layoutjiujitsu.com.br",
+    phone: "+55 (11) 98844-3322",
+    cpf: "789.012.345-67",
+    plan: "Mensal",
+    planValue: 220,
+    belt: "Purple",
+    stripes: 2,
+    attendance30Days: 16,
+    daysSinceLastClass: 1,
+    status: "Active",
+    paymentStatus: "Paid",
+    registrationDate: "2023-02-10",
+    birthDate: "1992-08-14",
+    asaasCustomerId: "cus_0000010097",
+    asaasSubscriptionId: "sub_10091829",
+    billingType: "PIX",
+    loyaltyPoints: 1950,
+    loyaltyTier: "Prata",
+    referralCode: "FELIPELAYOUT",
+    badges: ["Competidor Ativo", "Finalizador"]
+  },
+  {
+    id: "st-8",
+    academyId: "ac-4",
+    name: "Amanda Silveira (Layout BJJ)",
+    email: "amanda.silveira@layoutjiujitsu.com.br",
+    phone: "+55 (11) 97711-2200",
+    cpf: "890.123.456-78",
+    plan: "Anual",
+    planValue: 200,
+    belt: "Blue",
+    stripes: 3,
+    attendance30Days: 14,
+    daysSinceLastClass: 2,
+    status: "Active",
+    paymentStatus: "Paid",
+    registrationDate: "2024-01-20",
+    birthDate: "1996-11-03",
+    asaasCustomerId: "cus_0000010098",
+    asaasSubscriptionId: "sub_10091830",
+    billingType: "CREDIT_CARD",
+    loyaltyPoints: 1200,
+    loyaltyTier: "Bronze",
+    referralCode: "AMANDALAYOUT",
+    badges: ["Guerreira do Tatame", "Top Frequência"]
+  },
+  {
+    id: "st-9",
     academyId: "ac-2",
     name: "Felipe Mendes",
     email: "felipe.mendes@email.com",
@@ -482,6 +567,74 @@ export const initialCampaigns: MarketingCampaign[] = [
     sentCount: 0,
     targetAudience: "Leads do funil na fase de proposta",
   },
+];
+
+export const initialAcademyPosts: AcademyPost[] = [
+  {
+    id: "post-1",
+    academyId: "ac-4",
+    academyName: "Layout Jiu-Jitsu",
+    authorName: "Prof. Roberto Mendes",
+    authorRole: "Professor",
+    title: "🏆 Copa Layout Jiu-Jitsu & Open BJJ Championship 2026",
+    category: "Campeonato",
+    description: "Estão abertas as inscrições oficiais para a Copa Layout Jiu-Jitsu! O torneio contará com disputas com e sem kimono (Gi e No-Gi) do Pré-Mirim ao Master, premiação em dinheiro para os absolutos de Faixa Azul a Preta, medalhas exclusivas e troféu por equipes.",
+    flyerImageUrl: "/src/assets/images/bjj_championship_flyer_1787353673856.jpg",
+    eventDate: "2026-10-15",
+    eventTime: "08:30 às 18:00",
+    location: "Ginásio Poliesportivo Central - São Paulo/SP",
+    registrationFee: 120,
+    registrationDeadline: "2026-10-10",
+    externalRegistrationUrl: "https://soucompetidor.com.br/evento/copa-layout-bjj-2026",
+    targetAudience: "Todos os Alunos",
+    pinned: true,
+    createdAt: "2026-08-20T10:00:00.000Z",
+    interestedStudentIds: ["st-1", "st-2", "st-3"],
+    viewsCount: 142
+  },
+  {
+    id: "post-2",
+    academyId: "ac-4",
+    academyName: "Layout Jiu-Jitsu",
+    authorName: "Prof. Roberto Mendes",
+    authorRole: "Professor",
+    title: "🥋 Seminário Técnico Especial: Passagem de Guarda Moderna & Berimbolo",
+    category: "Seminário",
+    description: "Seminário intensivo de 4 horas focando nos detalhes de retenção de guarda, passagem emborcada e transições para as costas. Aberto para todas as faixas da academia. Vagas limitadas por capacidade do tatame.",
+    flyerImageUrl: "/src/assets/images/bjj_seminar_flyer_1787353688432.jpg",
+    eventDate: "2026-11-28",
+    eventTime: "14:00 às 18:00",
+    location: "Tatame Principal - Layout Jiu-Jitsu Matriz",
+    registrationFee: 80,
+    registrationDeadline: "2026-11-25",
+    externalRegistrationUrl: "https://layoutjiujitsu.com.br/seminario",
+    targetAudience: "Todos os Alunos",
+    pinned: false,
+    createdAt: "2026-08-18T14:30:00.000Z",
+    interestedStudentIds: ["st-2"],
+    viewsCount: 88
+  },
+  {
+    id: "post-3",
+    academyId: "ac-2",
+    academyName: "Alliance São Paulo",
+    authorName: "Mestre Marcelo",
+    authorRole: "Mestre",
+    title: "🎓 Grande Cerimônia de Graduação & Entrega de Faixas 2026.2",
+    category: "Graduação",
+    description: "Convocamos todos os alunos para a tradicional graduação de fim de ano. Teremos o treinão geral comemorativo, entrega de graus para quem atingiu o volume de aulas exigido e batismo das novas faixas.",
+    flyerImageUrl: "/src/assets/images/bjj_seminar_flyer_1787353688432.jpg",
+    eventDate: "2026-12-19",
+    eventTime: "10:00",
+    location: "Dojo Central Alliance - São Paulo",
+    registrationFee: 0,
+    registrationDeadline: "2026-12-15",
+    targetAudience: "Todos os Alunos",
+    pinned: true,
+    createdAt: "2026-08-15T09:00:00.000Z",
+    interestedStudentIds: ["st-1", "st-4"],
+    viewsCount: 210
+  }
 ];
 
 export const initialLoyaltyRewards = [

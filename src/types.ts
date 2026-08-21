@@ -8,6 +8,13 @@ export interface Academy {
   monthlyRevenue: number;
   pendingGraduations: number;
   instructorsCount: number;
+  subdomain?: string; // e.g. "gracie", "alliance", "atos"
+  customDomain?: string; // e.g. "gracie.bjjacademy.app.br"
+  asaasWalletId?: string; // Asaas Subaccount Wallet ID e.g. "wal_098231902"
+  asaasSubaccountId?: string; // e.g. "subacc_8819203"
+  splitRatePercentage?: number; // e.g. 95 (Academy gets 95%, Platform retains 5%)
+  platformFeeFixed?: number; // e.g. 0.00 or R$ 2.90
+  status?: "Active" | "Pending_KYC" | "Suspended";
 }
 
 export interface Instructor {
@@ -316,6 +323,63 @@ export interface SaasPlatformInvoice {
   pixCopiaECola?: string;
   pdfUrl?: string;
   asaasInvoiceId?: string;
+}
+
+export interface RedisWebhookJob {
+  id: string;
+  queue: string;
+  provider: "Asaas" | "MercadoPago" | "Stripe" | "Pagarme" | "Generic";
+  eventId: string;
+  eventType: string;
+  payload: any;
+  status: "queued" | "processing" | "completed" | "failed" | "dead_letter";
+  attempts: number;
+  maxAttempts: number;
+  enqueuedAt: string;
+  processedAt?: string;
+  error?: string;
+  tenantId?: string;
+  actionTaken?: string;
+  executionTimeMs?: number;
+}
+
+export interface RedisQueueStats {
+  connected: boolean;
+  redisHost: string;
+  mode: "redis" | "in_memory_fallback";
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  deadLetter: number;
+  avgLatencyMs: number;
+  uptimeSeconds: number;
+  processedPerMinute: number;
+}
+
+export type PostCategory = "Campeonato" | "Seminário" | "Graduação" | "Aviso Geral" | "Promoção";
+
+export interface AcademyPost {
+  id: string;
+  academyId: string;
+  academyName: string;
+  authorName: string;
+  authorRole: "Professor" | "Mestre" | "Gestor";
+  title: string;
+  category: PostCategory;
+  description: string;
+  flyerImageUrl?: string;
+  eventDate?: string;
+  eventTime?: string;
+  location?: string;
+  registrationFee?: number;
+  registrationDeadline?: string;
+  externalRegistrationUrl?: string;
+  targetAudience: "Todos os Alunos" | "Equipe de Competição" | "Kids / Infantil" | "Adultos";
+  pinned: boolean;
+  createdAt: string;
+  interestedStudentIds: string[];
+  viewsCount: number;
 }
 
 

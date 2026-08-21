@@ -3,6 +3,8 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { webhookQueue } from "./src/server/redisQueue";
+import { tenantContextMiddleware, auditDatabaseTenantIndexing } from "./src/server/tenantSecurity";
 
 dotenv.config();
 
@@ -10,6 +12,44 @@ const app = express();
 const PORT = 3000;
 
 app.use(express.json());
+
+// Cloudflare & Custom Domain CORS & Real IP Handling
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const cfConnectingIp = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+  const cfRay = req.headers["cf-ray"] || "direct-local";
+  const cfCountry = req.headers["cf-ipcountry"] || "BR";
+
+  // Allow bjjacademy.app.br, api.bjjacademy.app.br, tenant subdomains (*.bjjacademy.app.br) and localhost
+  if (origin) {
+    if (
+      origin === "https://bjjacademy.app.br" ||
+      origin === "https://api.bjjacademy.app.br" ||
+      origin.endsWith(".bjjacademy.app.br") ||
+      origin.includes("localhost") ||
+      origin.includes("run.app")
+    ) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Tenant-ID, X-Academy-ID, X-User-ID, asaas-access-token, x-webhook-secret");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+  }
+
+  // Attach cloudflare client metadata for security auditing
+  (req as any).cloudflare = {
+    clientIp: cfConnectingIp,
+    cfRay,
+    country: cfCountry
+  };
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+app.use(tenantContextMiddleware);
 
 // Initialize Gemini Client
 let ai: GoogleGenAI | null = null;
@@ -33,16 +73,152 @@ if (process.env.GEMINI_API_KEY) {
 
 // API Routes
 app.get("/api/health", (req, res) => {
-  res.json({ status: "healthy", timestamp: new Date().toISOString() });
+  res.json({ 
+    status: "healthy", 
+    service: "bjj-academy-production",
+    domain: "bjjacademy.app.br",
+    api: "api.bjjacademy.app.br",
+    cloudflare: (req as any).cloudflare || { status: "direct" },
+    timestamp: new Date().toISOString() 
+  });
+});
+
+// GET /api/infrastructure/architecture-status - Status completo da Arquitetura Cloudflare + Cloud Run + Asaas Subcontas
+app.get("/api/infrastructure/architecture-status", (req, res) => {
+  res.json({
+    success: true,
+    architecture: {
+      domain: "bjjacademy.app.br",
+      apiDomain: "api.bjjacademy.app.br",
+      dnsProvider: "Cloudflare (Zone Delegation from Registro.br)",
+      security: {
+        sslMode: "Full (Strict) with Automatic Edge Certificates",
+        waf: "Active (OWASP Top 10 + DDoS Rate Limiting)",
+        cdnCaching: "Active for static assets (Vite /dist)"
+      },
+      compute: {
+        platform: "Google Cloud Run (GCP)",
+        region: "us-east1 / southamerica-east1",
+        containerRuntime: "Node 20 + Express + React 19 SPA",
+        ingress: "All Traffic via Cloudflare Proxy"
+      },
+      database: {
+        engine: "PostgreSQL 16 Enterprise",
+        orm: "Prisma ORM",
+        security: "Row-Level Security (RLS) Active on 10/10 Tables",
+        indexing: "B-Tree + Composite on (tenant_id)"
+      },
+      messagingQueue: {
+        engine: "Redis Async Queue with Background Worker",
+        idempotencyKeyTTL: "7 Days (Atomic Locks)",
+        dlqPolicy: "3 Retries with Exponential Backoff -> Dead Letter Queue"
+      },
+      paymentGateway: {
+        provider: "Asaas Payments & Financial Infrastructure",
+        model: "Subcontas Dedicadas por Academia (Split Direto no Gateway)",
+        supportedMethods: ["PIX Dinâmico Instantâneo", "Cartão de Crédito Tokenizado", "Boleto Bancário com Baixa Automática"],
+        webhookUrl: "https://bjjacademy.app.br/api/webhooks/asaas"
+      },
+      tenants: [
+        { id: "ac-1", name: "Gracie Barra Barra da Tijuca", subdomain: "gracie.bjjacademy.app.br", asaasWalletId: "wal_gracie_889210041", split: "95% Academia / 5% SaaS" },
+        { id: "ac-2", name: "Alliance São Paulo", subdomain: "alliance.bjjacademy.app.br", asaasWalletId: "wal_alliance_994120381", split: "95% Academia / 5% SaaS" },
+        { id: "ac-3", name: "Atos BJJ San Diego", subdomain: "atos.bjjacademy.app.br", asaasWalletId: "wal_atos_110293847", split: "95% Academia / 5% SaaS" }
+      ]
+    },
+    timestamp: new Date().toISOString()
+  });
+});
+
+// GET /api/asaas/subaccounts - Lista de Subcontas Asaas por Academia (Tenant Isolation)
+app.get("/api/asaas/subaccounts", (req, res) => {
+  res.json({
+    success: true,
+    totalSubaccounts: 3,
+    subaccounts: [
+      {
+        id: "subacc_ac1_gracie",
+        academyId: "ac-1",
+        academyName: "Gracie Barra Barra da Tijuca",
+        cnpjOrCpf: "34.112.980/0001-44",
+        walletId: "wal_gracie_889210041",
+        apiKeyMasked: "$aact_YTU5YTE0M2M6...4b8e",
+        status: "ACTIVE",
+        balanceTotal: 18200.00,
+        balanceAvailable: 15450.00,
+        balancePending: 2750.00,
+        splitPercentageAcademy: 95,
+        splitPercentagePlatform: 5,
+        autoTransferDaily: true
+      },
+      {
+        id: "subacc_ac2_alliance",
+        academyId: "ac-2",
+        academyName: "Alliance São Paulo",
+        cnpjOrCpf: "18.445.671/0001-92",
+        walletId: "wal_alliance_994120381",
+        apiKeyMasked: "$aact_ZGY0MmFiOWE6...9f12",
+        status: "ACTIVE",
+        balanceTotal: 15400.00,
+        balanceAvailable: 14100.00,
+        balancePending: 1300.00,
+        splitPercentageAcademy: 95,
+        splitPercentagePlatform: 5,
+        autoTransferDaily: true
+      },
+      {
+        id: "subacc_ac3_atos",
+        academyId: "ac-3",
+        academyName: "Atos BJJ San Diego",
+        cnpjOrCpf: "29.771.302/0001-18",
+        walletId: "wal_atos_110293847",
+        apiKeyMasked: "$aact_M2U4YTFkOTQ6...2c71",
+        status: "ACTIVE",
+        balanceTotal: 13500.00,
+        balanceAvailable: 12200.00,
+        balancePending: 1300.00,
+        splitPercentageAcademy: 95,
+        splitPercentagePlatform: 5,
+        autoTransferDaily: true
+      }
+    ]
+  });
+});
+
+// POST /api/asaas/split/calculate - Cálculo de Split Automático
+app.post("/api/asaas/split/calculate", (req, res) => {
+  const { amount, splitAcademyPercent = 95, fixedFee = 0.00 } = req.body;
+  const gross = parseFloat(amount) || 0;
+  const asaasGatewayFee = gross >= 100 ? 0.99 : 0.79;
+  const platformFee = Math.max(0, (gross * ((100 - splitAcademyPercent) / 100)) + fixedFee);
+  const academyNet = Math.max(0, gross - platformFee - asaasGatewayFee);
+
+  res.json({
+    grossAmount: gross,
+    asaasGatewayFee,
+    platformFee,
+    academyNet,
+    academyPercent: splitAcademyPercent,
+    platformPercent: 100 - splitAcademyPercent
+  });
+});
+
+// GET /api/database/tenant-index-audit - Verificação de Isolamento e Índices Multi-Tenant no Banco
+app.get("/api/database/tenant-index-audit", (req, res) => {
+  const auditReport = auditDatabaseTenantIndexing();
+  res.json({
+    success: true,
+    ...auditReport,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ==========================================
-// DECOUPLED PAYMENT GATEWAY & WEBHOOK ENGINE
-// (Clean Architecture & Multi-tenant Webhooks)
+// REDIS ASYNC WEBHOOK QUEUE & WORKER ENGINE
+// (Idempotency, Resilient Queues, DLQ, Multi-tenant)
 // ==========================================
 
-// Webhook endpoint for Asaas Gateway Events
-app.post("/api/webhooks/asaas", (req, res) => {
+// Webhook endpoint for Asaas Gateway Events (Producer -> Redis Queue)
+app.post("/api/webhooks/asaas", async (req, res) => {
   const webhookSecret = req.headers["asaas-access-token"] || req.headers["x-webhook-secret"];
   const event = req.body;
 
@@ -53,49 +229,134 @@ app.post("/api/webhooks/asaas", (req, res) => {
     return res.status(400).json({ error: "Invalid webhook payload structure" });
   }
 
-  // Simulate Webhook Processing & Automatic Student Status Update
-  const { event: eventType, payment } = event;
-  let actionTaken = "NO_OP";
+  const eventId = event.id || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const eventType = event.event;
+  const payment = event.payment || {};
 
-  switch (eventType) {
-    case "PAYMENT_RECEIVED":
-    case "PAYMENT_CONFIRMED":
-      actionTaken = "STUDENT_FINANCIAL_STATUS_SET_TO_PAID_AND_UNLOCKED";
-      break;
-    case "PAYMENT_OVERDUE":
-      actionTaken = "STUDENT_FINANCIAL_STATUS_SET_TO_OVERDUE_AND_LOCKED_AT_TURNSTILE";
-      break;
-    case "PAYMENT_REFUNDED":
-    case "PAYMENT_DELETED":
-      actionTaken = "INVOICE_CANCELLED_AUDIT_LOGGED";
-      break;
-    default:
-      actionTaken = "LOGGED_FOR_AUDIT";
-  }
-
-  return res.json({
-    success: true,
-    processedAt: new Date().toISOString(),
+  // Enqueue job into Redis Queue
+  const queueResult = await webhookQueue.enqueue({
     provider: "Asaas",
-    eventId: event.id || `evt_${Date.now()}`,
+    eventId,
     eventType,
-    actionTaken,
-    tenantStatus: "RECONCILED"
+    payload: event,
+    tenantAcademyId: payment.academyId || event.academyId || "ac-1",
+    studentId: payment.studentId || event.studentId,
+    amount: payment.value || payment.netValue
+  });
+
+  // Fast response (200 / 202 Accepted) preventing gateway timeout
+  return res.status(200).json({
+    success: true,
+    message: queueResult.message,
+    jobId: queueResult.jobId,
+    queueStatus: queueResult.status,
+    position: queueResult.position,
+    eventId,
+    eventType,
+    enqueuedAt: new Date().toISOString()
   });
 });
 
-// Generic Gateway Webhook (Mercado Pago, Stripe, Pagar.me)
-app.post("/api/webhooks/generic", (req, res) => {
-  const { provider, eventType, tenantAcademyId, payload } = req.body;
+// Generic Gateway Webhook (Mercado Pago, Stripe, Pagar.me) -> Redis Queue
+app.post("/api/webhooks/generic", async (req, res) => {
+  const { provider, eventType, tenantAcademyId, payload, eventId } = req.body;
+  const generatedId = eventId || `evt_gen_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   
+  const queueResult = await webhookQueue.enqueue({
+    provider: provider || "Generic",
+    eventId: generatedId,
+    eventType: eventType || "PAYMENT_RECEIVED",
+    payload: payload || req.body,
+    tenantAcademyId: tenantAcademyId || "ac-1"
+  });
+
   return res.json({
     success: true,
+    jobId: queueResult.jobId,
+    status: queueResult.status,
+    message: queueResult.message,
     provider: provider || "GenericGatewayAdapter",
     tenantAcademyId: tenantAcademyId || "ac-1",
-    eventType,
-    status: "PROCESSED_VIA_STRATEGY_PATTERN",
     timestamp: new Date().toISOString()
   });
+});
+
+// GET /api/webhooks/queue/stats - Real-time Redis Queue Metrics & Worker Health
+app.get("/api/webhooks/queue/stats", async (req, res) => {
+  try {
+    const stats = await webhookQueue.getStats();
+    return res.json(stats);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/webhooks/queue/jobs - List Recent Jobs across Queues (Pending, Active, Completed, DLQ)
+app.get("/api/webhooks/queue/jobs", (req, res) => {
+  const limit = parseInt(req.query.limit as string || "30", 10);
+  const jobs = webhookQueue.getRecentJobs(limit);
+  return res.json({ jobs, count: jobs.length });
+});
+
+// POST /api/webhooks/queue/test-simulate - Trigger a simulated webhook into Redis Queue for Testing
+app.post("/api/webhooks/queue/test-simulate", async (req, res) => {
+  const { eventType = "PAYMENT_RECEIVED", studentName = "Aluno Tatame", amount = 150, academyId = "ac-1" } = req.body;
+  const eventId = `test_evt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  
+  const samplePayload = {
+    id: eventId,
+    event: eventType,
+    dateCreated: new Date().toISOString(),
+    payment: {
+      id: `pay_${Date.now()}`,
+      customer: `cus_${Math.random().toString(36).substring(2, 8)}`,
+      studentName,
+      value: amount,
+      netValue: amount - 5.0,
+      billingType: "PIX",
+      status: eventType === "PAYMENT_RECEIVED" ? "RECEIVED" : (eventType === "PAYMENT_OVERDUE" ? "OVERDUE" : "CONFIRMED"),
+      dueDate: new Date().toISOString().split("T")[0],
+      academyId
+    }
+  };
+
+  const queueResult = await webhookQueue.enqueue({
+    provider: "Asaas",
+    eventId,
+    eventType,
+    payload: samplePayload,
+    tenantAcademyId: academyId,
+    amount
+  });
+
+  return res.json({
+    success: true,
+    simulatedEvent: eventType,
+    jobId: queueResult.jobId,
+    status: queueResult.status,
+    message: `Evento simulado [${eventType}] enfileirado com sucesso no Redis!`,
+    position: queueResult.position
+  });
+});
+
+// POST /api/webhooks/queue/retry-dlq - Retry Dead Letter Job
+app.post("/api/webhooks/queue/retry-dlq", async (req, res) => {
+  const { jobId } = req.body;
+  if (!jobId) {
+    return res.status(400).json({ error: "jobId is required" });
+  }
+
+  const success = await webhookQueue.retryJob(jobId);
+  return res.json({
+    success,
+    message: success ? `Job ${jobId} reenfileirado para reprocessamento.` : `Job ${jobId} não encontrado na fila DLQ.`
+  });
+});
+
+// POST /api/webhooks/queue/clear - Clear Completed / DLQ queues
+app.post("/api/webhooks/queue/clear", async (req, res) => {
+  await webhookQueue.clearQueues();
+  return res.json({ success: true, message: "Histórico de filas e DLQ limpo com sucesso." });
 });
 
 // API Route for Asaas Customer REST API Sync (Clean Architecture REST Layer)

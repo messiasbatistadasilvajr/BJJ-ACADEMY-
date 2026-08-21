@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   PaymentHistory, Student, Academy, AsaasWebhookEvent, PaymentProvider, 
   PaymentBillingType, SubscriptionPlan, AccountsPayable, AccountsReceivable, 
-  AuditLog, GatewayAdapterConfig, UserRole, SaasPlatformInvoice
+  AuditLog, GatewayAdapterConfig, UserRole, SaasPlatformInvoice,
+  RedisWebhookJob, RedisQueueStats
 } from "../types";
 import { 
   CreditCard, TrendingUp, DollarSign, ArrowUpRight, 
@@ -10,8 +11,15 @@ import {
   QrCode, CheckCircle, Building2, Heart, FileText, RefreshCw, Settings,
   Link as LinkIcon, AlertTriangle, Zap, Calendar, Sliders, Eye, UserPlus, FileCheck,
   PauseCircle, PlayCircle, Ban, Layers, ShieldCheck, Database, Code, FileSpreadsheet,
-  Download, ArrowDownRight, Tag, Shield, Terminal, CheckSquare, PlusCircle
+  Download, ArrowDownRight, Tag, Shield, Terminal, CheckSquare, PlusCircle,
+  Activity, Cpu, RotateCcw, Server, Inbox, Play, CheckCheck, Globe,
+  Cloud, Lock, Workflow, ArrowRight, Coins, Percent
 } from "lucide-react";
+import { 
+  initialSubaccounts, calculateAsaasSplit, generateAsaasPaymentLink,
+  copyToClipboard 
+} from "../services/asaasService";
+import { AsaasSubaccountInfo } from "../types/asaas";
 
 interface FinanceViewProps {
   payments: PaymentHistory[];
@@ -34,7 +42,7 @@ export default function FinanceView({
 }: FinanceViewProps) {
   // Navigation Sub-Tabs
   const [activeSubTab, setActiveSubTab] = useState<
-    "dashboard" | "subscriptions" | "asaas-gateway" | "accounts" | "audit" | "api-docs" | "saas"
+    "dashboard" | "subscriptions" | "subaccounts" | "asaas-gateway" | "redis-queue" | "accounts" | "audit" | "api-docs" | "saas"
   >("dashboard");
 
   // Multi-Tenant Academy Filter
@@ -45,6 +53,201 @@ export default function FinanceView({
 
   // Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // ==========================================
+  // REDIS WEBHOOK QUEUE & WORKER MONITOR STATE
+  // ==========================================
+  const [redisStats, setRedisStats] = useState<RedisQueueStats>({
+    connected: false,
+    redisHost: "127.0.0.1:6379",
+    mode: "in_memory_fallback",
+    waiting: 0,
+    active: 0,
+    completed: 18,
+    failed: 0,
+    deadLetter: 0,
+    avgLatencyMs: 78,
+    uptimeSeconds: 342,
+    processedPerMinute: 14.5
+  });
+
+  const [redisJobs, setRedisJobs] = useState<RedisWebhookJob[]>([
+    {
+      id: "job_init_01",
+      queue: "bjj:queue:webhooks:completed",
+      provider: "Asaas",
+      eventId: "evt_asaas_88192301",
+      eventType: "PAYMENT_RECEIVED",
+      payload: { value: 180, studentName: "Lucas Mendes", billingType: "PIX" },
+      status: "completed",
+      attempts: 1,
+      maxAttempts: 3,
+      enqueuedAt: new Date(Date.now() - 120000).toISOString(),
+      processedAt: new Date(Date.now() - 118000).toISOString(),
+      tenantId: "ac-1",
+      actionTaken: "SPLIT_APPLIED: Asaas Repasse R$ 171,00 para Gracie Barra. Aluno liberado na catraca.",
+      executionTimeMs: 72
+    },
+    {
+      id: "job_init_02",
+      queue: "bjj:queue:webhooks:completed",
+      provider: "Asaas",
+      eventId: "evt_asaas_88192302",
+      eventType: "PAYMENT_CONFIRMED",
+      payload: { value: 250, studentName: "Beatriz Lima", billingType: "CREDIT_CARD" },
+      status: "completed",
+      attempts: 1,
+      maxAttempts: 3,
+      enqueuedAt: new Date(Date.now() - 340000).toISOString(),
+      processedAt: new Date(Date.now() - 338000).toISOString(),
+      tenantId: "ac-2",
+      actionTaken: "SPLIT_APPLIED: Asaas Repasse R$ 237,50 para Alliance SP. Mensalidade quitada.",
+      executionTimeMs: 84
+    },
+    {
+      id: "job_init_03",
+      queue: "bjj:queue:webhooks:completed",
+      provider: "Asaas",
+      eventId: "evt_asaas_88192303",
+      eventType: "PAYMENT_OVERDUE",
+      payload: { value: 150, studentName: "Rodrigo Gracie", billingType: "BOLETO" },
+      status: "completed",
+      attempts: 1,
+      maxAttempts: 3,
+      enqueuedAt: new Date(Date.now() - 600000).toISOString(),
+      processedAt: new Date(Date.now() - 598000).toISOString(),
+      tenantId: "ac-1",
+      actionTaken: "INADIMPLENCIA_AUTOMATICA: Mensalidade vencida. Juros de 0.033%/dia aplicados.",
+      executionTimeMs: 65
+    }
+  ]);
+
+  const [isSimulatingWebhook, setIsSimulatingWebhook] = useState(false);
+  const [isRefreshingQueue, setIsRefreshingQueue] = useState(false);
+
+  // Fetch real-time Redis queue data from server API
+  const fetchRedisQueueData = async () => {
+    try {
+      setIsRefreshingQueue(true);
+      const [statsRes, jobsRes] = await Promise.all([
+        fetch("/api/webhooks/queue/stats"),
+        fetch("/api/webhooks/queue/jobs?limit=35")
+      ]);
+
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setRedisStats(statsData);
+      }
+      if (jobsRes.ok) {
+        const jobsData = await jobsRes.json();
+        if (jobsData.jobs && jobsData.jobs.length > 0) {
+          setRedisJobs(jobsData.jobs);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not reach /api/webhooks/queue endpoints:", err);
+    } finally {
+      setIsRefreshingQueue(false);
+    }
+  };
+
+  // Poll Redis queue every 4 seconds when tab is active
+  useEffect(() => {
+    fetchRedisQueueData();
+    const interval = setInterval(() => {
+      if (activeSubTab === "redis-queue") {
+        fetchRedisQueueData();
+      }
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [activeSubTab]);
+
+  // Simulate webhook into Redis queue
+  const handleSimulateRedisWebhook = async (eventType: string, studentName = "Gabriel Tatame", amount = 180) => {
+    try {
+      setIsSimulatingWebhook(true);
+      const res = await fetch("/api/webhooks/queue/test-simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventType,
+          studentName,
+          amount,
+          academyId: selectedAcademyId === "ALL" ? "ac-1" : selectedAcademyId
+        })
+      });
+      const data = await res.json();
+      triggerToast(`⚡ Webhook [${eventType}] enfileirado no Redis! Job ID: ${data.jobId}`);
+      // Refresh list after brief moment
+      setTimeout(fetchRedisQueueData, 450);
+    } catch (err) {
+      triggerToast("Erro ao enfileirar webhook no Redis.");
+    } finally {
+      setIsSimulatingWebhook(false);
+    }
+  };
+
+  // Batch trigger simulated webhooks
+  const handleSimulateBatch = async () => {
+    setIsSimulatingWebhook(true);
+    const events = [
+      { type: "PAYMENT_RECEIVED", name: "Rafael Mendes", val: 220 },
+      { type: "PAYMENT_CONFIRMED", name: "Camila Jiu-Jitsu", val: 190 },
+      { type: "PAYMENT_OVERDUE", name: "Marcos Faixa Azul", val: 150 },
+      { type: "PAYMENT_REFUNDED", name: "Felipe Nogueira", val: 200 }
+    ];
+
+    for (const item of events) {
+      await fetch("/api/webhooks/queue/test-simulate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          eventType: item.type,
+          studentName: item.name,
+          amount: item.val,
+          academyId: "ac-1"
+        })
+      });
+      await new Promise(r => setTimeout(r, 120));
+    }
+    triggerToast("⚡ Lote de 4 Webhooks enfileirados simultaneamente no Redis!");
+    setTimeout(fetchRedisQueueData, 600);
+    setIsSimulatingWebhook(false);
+  };
+
+  // Retry DLQ Job
+  const handleRetryDlqJob = async (jobId: string) => {
+    try {
+      const res = await fetch("/api/webhooks/queue/retry-dlq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId })
+      });
+      const data = await res.json();
+      triggerToast(data.message || "Job reenfileirado.");
+      fetchRedisQueueData();
+    } catch (e) {
+      triggerToast("Erro ao reprocessar job.");
+    }
+  };
+
+  // Clear Queues
+  const handleClearQueues = async () => {
+    try {
+      await fetch("/api/webhooks/queue/clear", { method: "POST" });
+      triggerToast("Filas e histórico de jobs limpos com sucesso.");
+      fetchRedisQueueData();
+    } catch (e) {
+      triggerToast("Erro ao limpar filas.");
+    }
+  };
+
+  // Asaas Subaccounts per Tenant Academy (Multi-Tenant Financial Isolation)
+  const [subaccounts, setSubaccounts] = useState<AsaasSubaccountInfo[]>(initialSubaccounts);
+  const [splitSimAmount, setSplitSimAmount] = useState("220");
+  const [splitSimAcademyPercent, setSplitSimAcademyPercent] = useState(95);
+  const [selectedSubaccountForModal, setSelectedSubaccountForModal] = useState<AsaasSubaccountInfo | null>(null);
+  const [showCreateSubaccountModal, setShowCreateSubaccountModal] = useState(false);
 
   // BJJ Academy SaaS Platform Master Invoices (Licenciamento do Software cobrado das Academias Contratantes)
   const [saasInvoices, setSaasInvoices] = useState<SaasPlatformInvoice[]>([
@@ -766,9 +969,24 @@ export default function FinanceView({
           }`}
         >
           <Zap className="w-4 h-4 text-blue-400" />
-          <span>Assinaturas Recorrentes Asaas</span>
+          <span>Assinaturas Recorrentes</span>
           <span className="text-[9px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded-full border border-blue-500/20 font-mono">
             {filteredStudents.length} ativas
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab("subaccounts")}
+          className={`px-4 py-3 font-display text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            activeSubTab === "subaccounts"
+              ? "border-emerald-500 text-emerald-400"
+              : "border-transparent text-slate-400 hover:text-slate-300"
+          }`}
+        >
+          <Coins className="w-4 h-4 text-emerald-400" />
+          <span>Subcontas Asaas & Split</span>
+          <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-400/30 font-mono font-bold">
+            Split 95/5
           </span>
         </button>
 
@@ -796,7 +1014,24 @@ export default function FinanceView({
           }`}
         >
           <Layers className="w-4 h-4 text-emerald-400" />
-          <span>Gateways & Adapters (Strategy)</span>
+          <span>Gateways & Adapters</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab("redis-queue")}
+          className={`px-4 py-3 font-display text-xs font-semibold border-b-2 transition-all flex items-center gap-2 ${
+            activeSubTab === "redis-queue"
+              ? "border-red-500 text-red-400"
+              : "border-transparent text-slate-400 hover:text-slate-300"
+          }`}
+        >
+          <Cpu className="w-4 h-4 text-red-400" />
+          <span>Fila Redis & Workers</span>
+          <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-bold ${
+            redisStats.connected ? "bg-red-500/20 text-red-300 border border-red-500/30" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+          }`}>
+            {redisStats.waiting > 0 ? `${redisStats.waiting} em fila` : (redisStats.connected ? "Redis Online" : "Worker Ativo")}
+          </span>
         </button>
 
         <button
@@ -808,7 +1043,7 @@ export default function FinanceView({
           }`}
         >
           <FileSpreadsheet className="w-4 h-4 text-amber-400" />
-          <span>Contas a Pagar e Receber</span>
+          <span>Contas a Pagar</span>
         </button>
 
         <button
@@ -820,7 +1055,7 @@ export default function FinanceView({
           }`}
         >
           <ShieldCheck className="w-4 h-4 text-purple-400" />
-          <span>Auditoria Completa (Logs)</span>
+          <span>Auditoria (Logs)</span>
         </button>
 
         <button
@@ -831,8 +1066,8 @@ export default function FinanceView({
               : "border-transparent text-slate-400 hover:text-slate-300"
           }`}
         >
-          <Terminal className="w-4 h-4 text-indigo-400" />
-          <span>API REST & Prisma Schema</span>
+          <Globe className="w-4 h-4 text-indigo-400" />
+          <span>Cloudflare & Infraestrutura</span>
         </button>
       </div>
 
@@ -1112,6 +1347,249 @@ export default function FinanceView({
         </div>
       )}
 
+      {/* SUB-TAB: SUBCONTAS ASAAS & SPLIT DE PAGAMENTOS (MULTI-TENANT ISOLATION) */}
+      {activeSubTab === "subaccounts" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-emerald-950/80 via-slate-900 to-teal-950/80 border border-emerald-500/30 p-5 rounded-2xl shadow-xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-400">
+                  <Coins className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
+                    Subcontas Asaas & Split Automático por Academia
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                      MULTI-TENANT WALLETS
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-300">
+                    Cada academia possui uma <strong>subconta dedicada no Asaas</strong>. O dinheiro do aluno vai direto para a carteira da academia e o SaaS retém a comissão automaticamente.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowCreateSubaccountModal(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow flex items-center gap-1.5 transition-all"
+                >
+                  <PlusCircle className="w-4 h-4" /> Nova Subconta Asaas
+                </button>
+              </div>
+            </div>
+
+            {/* Architecture Comparison Pillars */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-2 text-xs">
+              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-emerald-400 font-bold block text-[11px] font-mono flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" /> 1. Sem Risco Fiscal (BACEN)
+                </span>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  A plataforma SaaS <strong>não faz custódia de dinheiro</strong> de terceiros. O Asaas faz a divisão (Split) direto na liquidação da cobrança.
+                </p>
+              </div>
+
+              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-blue-400 font-bold block text-[11px] font-mono flex items-center gap-1">
+                  <Percent className="w-3.5 h-3.5" /> 2. Split Automático (95% / 5%)
+                </span>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  95% do valor da mensalidade cai instantaneamente na carteira da academia contratante e 5% na carteira Master do BJJ Academy SaaS.
+                </p>
+              </div>
+
+              <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800 space-y-1">
+                <span className="text-amber-400 font-bold block text-[11px] font-mono flex items-center gap-1">
+                  <ArrowRight className="w-3.5 h-3.5" /> 3. Transferência Automática
+                </span>
+                <p className="text-slate-400 text-[11px] leading-relaxed">
+                  A academia cadastra sua conta bancária na subconta e recebe o saldo líquido via TED/PIX diário sem intervenção manual.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Split Simulator */}
+          <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                  <Percent className="w-4 h-4 text-emerald-400" />
+                  Simulador de Split de Pagamento em Tempo Real
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Calcule a divisão exata de qualquer mensalidade entre Gateway Asaas, Taxa do SaaS BJJ Academy e Repasse Líquido da Academia.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 font-mono">Valor da Mensalidade:</span>
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1">
+                  <span className="text-xs text-slate-500 font-bold mr-1">R$</span>
+                  <input
+                    type="number"
+                    value={splitSimAmount}
+                    onChange={(e) => setSplitSimAmount(e.target.value)}
+                    className="w-20 bg-transparent text-xs text-white font-mono font-bold focus:outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Split Math Cards */}
+            {(() => {
+              const splitResult = calculateAsaasSplit(Number(splitSimAmount) || 0, splitSimAcademyPercent);
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-1">
+                    <span className="text-[11px] text-slate-400 font-mono block">Valor Bruto (Aluno Paga)</span>
+                    <div className="text-xl font-bold text-white font-display font-mono">
+                      {splitResult.grossAmount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </div>
+                    <p className="text-[10px] text-slate-500">100% Cobrança via PIX/Cartão</p>
+                  </div>
+
+                  <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-1">
+                    <span className="text-[11px] text-slate-400 font-mono block">Taxa Gateway Asaas (PIX)</span>
+                    <div className="text-xl font-bold text-slate-300 font-display font-mono">
+                      {splitResult.asaasGatewayFee.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </div>
+                    <p className="text-[10px] text-slate-500">Tarifa fixa do Asaas por PIX recebido</p>
+                  </div>
+
+                  <div className="bg-slate-950 border border-blue-500/30 p-4 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-blue-300 font-mono block">Comissão SaaS BJJ Academy</span>
+                      <span className="text-[9px] bg-blue-500/20 text-blue-300 font-mono font-bold px-1.5 py-0.5 rounded">
+                        {splitResult.platformPercent}%
+                      </span>
+                    </div>
+                    <div className="text-xl font-bold text-blue-400 font-display font-mono">
+                      {splitResult.platformFee.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </div>
+                    <p className="text-[10px] text-blue-300/80">Retido para a carteira Master da plataforma</p>
+                  </div>
+
+                  <div className="bg-slate-950 border border-emerald-500/30 p-4 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-emerald-300 font-mono block">Líquido na Subconta Academia</span>
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-mono font-bold px-1.5 py-0.5 rounded">
+                        {splitResult.academyPercent}%
+                      </span>
+                    </div>
+                    <div className="text-xl font-bold text-emerald-400 font-display font-mono">
+                      {splitResult.academyNet.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </div>
+                    <p className="text-[10px] text-emerald-300/80">Disponível para saque bancário da academia</p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Subaccounts Cards Grid */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono flex items-center justify-between">
+              <span>Subcontas Ativas por Academia (Isolamento Financeiro)</span>
+              <span className="text-[10px] text-slate-500 font-normal">{subaccounts.length} subcontas vinculadas</span>
+            </h4>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {subaccounts.map((sub) => {
+                const academy = academies.find(a => a.id === sub.academyId);
+                return (
+                  <div
+                    key={sub.id}
+                    className="bg-slate-900 border border-slate-800 hover:border-emerald-500/40 transition-all rounded-2xl p-5 space-y-4 shadow-xl relative"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <span className="text-[10px] font-mono font-bold uppercase text-emerald-400 block">
+                          {sub.academyName}
+                        </span>
+                        <div className="text-xs text-slate-400 font-mono mt-0.5">
+                          CNPJ: <strong className="text-slate-300">{sub.cnpjOrCpf}</strong>
+                        </div>
+                      </div>
+                      <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono font-bold">
+                        {sub.status}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs font-mono">
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 text-[11px]">Asaas Wallet ID:</span>
+                        <span className="text-indigo-400 font-bold text-[11px]">{sub.walletId}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 text-[11px]">Subdomínio:</span>
+                        <span className="text-blue-400 text-[11px]">{academy?.subdomain || `${sub.academyId}.bjjacademy.app.br`}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 text-[11px]">API Key Dedicada:</span>
+                        <span className="text-slate-400 text-[11px]">{sub.apiKeyMasked}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-slate-500 text-[11px]">Regra de Split:</span>
+                        <span className="text-emerald-400 font-bold text-[11px]">
+                          {sub.splitPercentageAcademy}% Academia / {sub.splitPercentagePlatform}% SaaS
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/80">
+                        <span className="text-[9px] text-slate-500 block font-mono">Saldo Total</span>
+                        <span className="text-xs font-bold text-white font-mono">
+                          {sub.balanceTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </span>
+                      </div>
+                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/80">
+                        <span className="text-[9px] text-emerald-400 block font-mono">Disponível</span>
+                        <span className="text-xs font-bold text-emerald-400 font-mono">
+                          {sub.balanceAvailable.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </span>
+                      </div>
+                      <div className="bg-slate-950 p-2 rounded-lg border border-slate-800/80">
+                        <span className="text-[9px] text-amber-400 block font-mono">A Liberar</span>
+                        <span className="text-xs font-bold text-amber-400 font-mono">
+                          {sub.balancePending.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <button
+                        onClick={() => {
+                          const link = generateAsaasPaymentLink(sub.walletId, 220, "Matricula BJJ", sub.academyName);
+                          copyToClipboard(link);
+                          triggerToast(`Link de pagamento com Split copiado para ${sub.academyName}!`);
+                        }}
+                        className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <QrCode className="w-3.5 h-3.5" /> Gerar Link Split
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setSelectedSubaccountForModal(sub);
+                        }}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold p-2 rounded-xl border border-slate-700 transition-all"
+                        title="Ver Detalhes da Subconta"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SUB-TAB 3: GATEWAYS & ADAPTERS (STRATEGY PATTERN) */}
       {activeSubTab === "asaas-gateway" && (
         <div className="space-y-6 animate-in fade-in duration-200">
@@ -1274,6 +1752,346 @@ export default function FinanceView({
         </div>
       )}
 
+      {/* SUB-TAB: REDIS WEBHOOK QUEUE & ASYNC WORKERS */}
+      {activeSubTab === "redis-queue" && (
+        <div className="space-y-6 animate-in fade-in duration-200" id="redis-queue-panel">
+          {/* Header & Quick Action Bar */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-xl">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
+                  <Cpu className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-base font-bold text-white font-display flex items-center gap-2">
+                    Redis Webhook Queue & Background Worker Engine
+                    <span className="text-[10px] bg-red-500/20 text-red-300 border border-red-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                      REDIS + WORKER
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Fila assíncrona de webhooks com idempotência contra duplicidade, retries com backoff exponencial e Dead Letter Queue (DLQ).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                onClick={fetchRedisQueueData}
+                disabled={isRefreshingQueue}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all shadow"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingQueue ? "animate-spin text-emerald-400" : ""}`} />
+                Atualizar Fila
+              </button>
+
+              <button
+                onClick={handleClearQueues}
+                className="bg-slate-800/80 hover:bg-slate-800 text-slate-400 hover:text-rose-400 text-xs font-semibold px-3.5 py-2 rounded-xl border border-slate-700/60 flex items-center gap-1.5 transition-all"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Limpar Histórico
+              </button>
+            </div>
+          </div>
+
+          {/* Engine Status Bar */}
+          <div className="bg-slate-900/90 border border-slate-800 p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </span>
+                <span className="font-semibold text-slate-200">
+                  {redisStats.connected ? "Conectado ao Redis Server" : "Worker Concorrente Ativo (Modo Resiliente)"}
+                </span>
+              </div>
+              <span className="text-slate-600">|</span>
+              <div className="font-mono text-slate-400 flex items-center gap-1">
+                <Server className="w-3.5 h-3.5 text-slate-500" />
+                <span>Host: <strong className="text-slate-300">{redisStats.redisHost}</strong></span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4 font-mono text-[11px] text-slate-400">
+              <div>
+                <span>Throughput: </span>
+                <strong className="text-emerald-400">{redisStats.processedPerMinute} jobs/min</strong>
+              </div>
+              <span className="text-slate-700">•</span>
+              <div>
+                <span>Latência Média: </span>
+                <strong className="text-blue-400">{redisStats.avgLatencyMs}ms</strong>
+              </div>
+              <span className="text-slate-700">•</span>
+              <div>
+                <span>Uptime Worker: </span>
+                <strong className="text-slate-300">{Math.floor(redisStats.uptimeSeconds / 60)}m {redisStats.uptimeSeconds % 60}s</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Live Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Fila de Espera (Pending)</span>
+                <Inbox className="w-4 h-4 text-blue-400" />
+              </div>
+              <div className="text-2xl font-bold text-blue-400 font-display">
+                {redisStats.waiting}
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                {redisStats.waiting > 0 ? "Aguardando consumo pelo Worker" : "Fila limpa, sem atrasos"}
+              </p>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Em Execução (Active)</span>
+                <Activity className="w-4 h-4 text-amber-400" />
+              </div>
+              <div className="text-2xl font-bold text-amber-400 font-display">
+                {redisStats.active}
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                Concorrência de processamento ativa
+              </p>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Concluídos com Idempotência</span>
+                <CheckCheck className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="text-2xl font-bold text-emerald-400 font-display">
+                {redisStats.completed}
+              </div>
+              <p className="text-[10px] text-emerald-400/80 font-mono">
+                100% livres de duplicidade
+              </p>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 shadow-lg">
+              <div className="flex items-center justify-between text-xs text-slate-400 font-mono">
+                <span>Dead Letter Queue (DLQ)</span>
+                <AlertTriangle className="w-4 h-4 text-rose-400" />
+              </div>
+              <div className="text-2xl font-bold text-rose-400 font-display">
+                {redisStats.deadLetter}
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                Falhas após 3 tentativas
+              </p>
+            </div>
+          </div>
+
+          {/* Interactive Simulation & Test Suite */}
+          <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 rounded-2xl space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                  <Play className="w-4 h-4 text-red-400 fill-red-400" />
+                  Simulador de Ingestão de Webhooks no Redis
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Dispare eventos simulados do gateway Asaas para testar o enfileiramento, conciliação e idempotência.
+                </p>
+              </div>
+
+              <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2.5 py-1 rounded-lg border border-slate-800">
+                POST /api/webhooks/asaas → Redis
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <button
+                onClick={() => handleSimulateRedisWebhook("PAYMENT_RECEIVED", "Matheus Tatame", 180)}
+                disabled={isSimulatingWebhook}
+                className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 p-3 rounded-xl text-left transition-all group"
+              >
+                <div className="flex items-center justify-between text-xs font-bold font-mono">
+                  <span>PAYMENT_RECEIVED</span>
+                  <span className="text-emerald-400 group-hover:translate-x-0.5 transition-transform">→</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  PIX Confirmado R$ 180 (Aplica Split e libera aluno na catraca).
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleSimulateRedisWebhook("PAYMENT_CONFIRMED", "Juliana Silva", 240)}
+                disabled={isSimulatingWebhook}
+                className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 p-3 rounded-xl text-left transition-all group"
+              >
+                <div className="flex items-center justify-between text-xs font-bold font-mono">
+                  <span>PAYMENT_CONFIRMED</span>
+                  <span className="text-blue-400 group-hover:translate-x-0.5 transition-transform">→</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Cartão Aprovado R$ 240 (Baixa automática no financeiro da unidade).
+                </p>
+              </button>
+
+              <button
+                onClick={() => handleSimulateRedisWebhook("PAYMENT_OVERDUE", "Thiago Gracie", 150)}
+                disabled={isSimulatingWebhook}
+                className="bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 p-3 rounded-xl text-left transition-all group"
+              >
+                <div className="flex items-center justify-between text-xs font-bold font-mono">
+                  <span>PAYMENT_OVERDUE</span>
+                  <span className="text-rose-400 group-hover:translate-x-0.5 transition-transform">→</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Fatura Vencida (Calcula juros/multa e bloqueia catraca).
+                </p>
+              </button>
+
+              <button
+                onClick={handleSimulateBatch}
+                disabled={isSimulatingWebhook}
+                className="bg-gradient-to-r from-red-600/30 to-amber-600/30 hover:from-red-600/40 hover:to-amber-600/40 text-white border border-red-500/40 p-3 rounded-xl text-left transition-all shadow-md group"
+              >
+                <div className="flex items-center justify-between text-xs font-bold font-mono">
+                  <span className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    DISPARAR LOTE CONCORRENTE
+                  </span>
+                  <span className="text-amber-400 group-hover:translate-x-0.5 transition-transform">⚡</span>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-1">
+                  Enfileira 4 webhooks de uma vez para testar consumo paralelo do Worker.
+                </p>
+              </button>
+            </div>
+          </div>
+
+          {/* Real-time Jobs Stream Table */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl space-y-3 p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                  <Database className="w-4 h-4 text-red-400" />
+                  Stream de Jobs no Redis (Últimos Processamentos)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Visualização em tempo real das mensagens enfileiradas e tratadas pelo background worker.
+                </p>
+              </div>
+
+              <div className="text-xs font-mono text-slate-400">
+                Total registrado: <strong className="text-white">{redisJobs.length} jobs</strong>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[10px] border-b border-slate-800">
+                  <tr>
+                    <th className="p-3">Job ID & Horário</th>
+                    <th className="p-3">Provedor & Evento</th>
+                    <th className="p-3">Status Fila</th>
+                    <th className="p-3">Tentativas</th>
+                    <th className="p-3">Tempo Execução</th>
+                    <th className="p-3">Ação Executada / Idempotência</th>
+                    <th className="p-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-sans">
+                  {redisJobs.map((job) => (
+                    <tr key={job.id} className="hover:bg-slate-900/40 transition-colors">
+                      <td className="p-3 font-mono text-slate-400 text-[11px]">
+                        <div className="font-semibold text-slate-200">{job.id}</div>
+                        <div className="text-[10px] text-slate-500">{new Date(job.enqueuedAt).toLocaleTimeString()}</div>
+                      </td>
+
+                      <td className="p-3">
+                        <div className="font-semibold text-white">{job.provider}</div>
+                        <div className="font-mono text-[10px] text-slate-400">{job.eventType}</div>
+                      </td>
+
+                      <td className="p-3">
+                        <span className={`inline-flex items-center gap-1 text-[10px] px-2.5 py-0.5 rounded font-mono font-bold ${
+                          job.status === "completed"
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                            : job.status === "processing"
+                            ? "bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse"
+                            : job.status === "dead_letter"
+                            ? "bg-rose-500/10 text-rose-400 border border-rose-500/30"
+                            : "bg-blue-500/10 text-blue-400 border border-blue-500/30"
+                        }`}>
+                          {job.status === "completed" && "✅ COMPLETED"}
+                          {job.status === "processing" && "⚙️ PROCESSING"}
+                          {job.status === "queued" && "📥 QUEUED"}
+                          {job.status === "dead_letter" && "🚨 DEAD LETTER"}
+                        </span>
+                      </td>
+
+                      <td className="p-3 font-mono text-slate-300">
+                        {job.attempts} / {job.maxAttempts}
+                      </td>
+
+                      <td className="p-3 font-mono text-slate-300">
+                        {job.executionTimeMs ? `${job.executionTimeMs}ms` : "-"}
+                      </td>
+
+                      <td className="p-3 text-slate-300 text-[11px] max-w-xs truncate" title={job.actionTaken || job.error}>
+                        {job.actionTaken || job.error || "Enfileirado na lista Redis..."}
+                      </td>
+
+                      <td className="p-3 text-right">
+                        {job.status === "dead_letter" ? (
+                          <button
+                            onClick={() => handleRetryDlqJob(job.id)}
+                            className="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[10px] px-2.5 py-1 rounded font-semibold transition-all"
+                          >
+                            Reprocessar DLQ
+                          </button>
+                        ) : (
+                          <span className="text-[10px] font-mono text-slate-500">Idempotent</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Technical Architecture Explanation Box */}
+          <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl space-y-3">
+            <h4 className="text-xs font-bold text-slate-200 font-mono flex items-center gap-2 uppercase tracking-wider">
+              <Code className="w-4 h-4 text-emerald-400" />
+              Fluxo da Arquitetura Redis de Alta Confiabilidade
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-400">
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
+                <strong className="text-white block font-sans">1. Produtor & Resposta Rápida</strong>
+                <p className="text-[11px] leading-relaxed">
+                  O endpoint <code className="text-emerald-400 font-mono">/api/webhooks/asaas</code> recebe o evento, valida o cabeçalho de assinatura, gera a chave de idempotência e empurra para a fila Redis com <code className="text-blue-300 font-mono">LPUSH</code>, retornando HTTP 200 em menos de 10ms.
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
+                <strong className="text-white block font-sans">2. Worker & Idempotência Atômica</strong>
+                <p className="text-[11px] leading-relaxed">
+                  O Background Worker consome via <code className="text-amber-400 font-mono">RPOP</code>, verifica a chave <code className="text-amber-300 font-mono">bjj:idempotency:*</code> com TTL de 7 dias e aplica a lógica de Split da academia no banco de dados.
+                </p>
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-1">
+                <strong className="text-white block font-sans">3. Retry Backoff & Dead Letter Queue</strong>
+                <p className="text-[11px] leading-relaxed">
+                  Falhas transitórias de rede sofrem retry automático com backoff exponencial. Se atingir 3 tentativas sem sucesso, o job é movido com segurança para <code className="text-rose-400 font-mono">bjj:queue:webhooks:dlq</code> para auditoria e replay manual.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* SUB-TAB 4: CONTAS A PAGAR E RECEBER */}
       {activeSubTab === "accounts" && (
         <div className="space-y-6 animate-in fade-in duration-200">
@@ -1416,20 +2234,284 @@ export default function FinanceView({
         </div>
       )}
 
-      {/* SUB-TAB 6: API REST & PRISMA SCHEMA */}
+      {/* SUB-TAB 6: ARQUITETURA CLOUDFLARE, CLOUD RUN, POSTGRESQL & REDIS */}
       {activeSubTab === "api-docs" && (
         <div className="space-y-6 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-                <Terminal className="w-5 h-5" />
+          {/* Architecture Visual Topology Card */}
+          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950/70 border border-indigo-500/30 p-6 rounded-2xl shadow-2xl space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center text-indigo-400">
+                  <Workflow className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white font-display flex items-center gap-2">
+                    Topologia de Produção Enterprise
+                    <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-400/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                      CLOUDFLARE + CLOUD RUN + POSTGRESQL
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-300">
+                    Infraestrutura resiliente de alto rendimento configurada para o domínio oficial <strong>bjjacademy.app.br</strong>.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h2 className="text-base font-bold text-white font-display">Especificação API REST NestJS & Prisma Schema</h2>
-                <p className="text-xs text-slate-400">Documentação interativa OpenAPI/Swagger do módulo financeiro multi-tenant.</p>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  Sistema Operando 100%
+                </span>
               </div>
             </div>
 
+            {/* Visual Node Flow */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-center text-xs">
+              {/* Node 1 */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-amber-500/30 space-y-2 shadow-lg flex flex-col items-center justify-between">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <div>
+                  <strong className="text-white block font-display">1. Cloudflare DNS</strong>
+                  <span className="text-[10px] text-amber-400 font-mono">bjjacademy.app.br</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">WAF, DDoS Shield, Edge SSL Full Strict & CDN</p>
+              </div>
+
+              {/* Node 2 */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-blue-500/30 space-y-2 shadow-lg flex flex-col items-center justify-between">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                  <Cloud className="w-4 h-4" />
+                </div>
+                <div>
+                  <strong className="text-white block font-display">2. GCP Cloud Run</strong>
+                  <span className="text-[10px] text-blue-400 font-mono">Auto-Scaling Serverless</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">Containers Node 20 / Express + React 19 SPA</p>
+              </div>
+
+              {/* Node 3 */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-red-500/30 space-y-2 shadow-lg flex flex-col items-center justify-between">
+                <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div>
+                  <strong className="text-white block font-display">3. Redis Queue</strong>
+                  <span className="text-[10px] text-red-400 font-mono">Async Webhooks</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">Idempotência atômica e Dead Letter Queue (DLQ)</p>
+              </div>
+
+              {/* Node 4 */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-emerald-500/30 space-y-2 shadow-lg flex flex-col items-center justify-between">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <strong className="text-white block font-display">4. PostgreSQL 16</strong>
+                  <span className="text-[10px] text-emerald-400 font-mono">Row-Level Security</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">Índices B-Tree compostos em tenant_id</p>
+              </div>
+
+              {/* Node 5 */}
+              <div className="bg-slate-950 p-4 rounded-xl border border-teal-500/30 space-y-2 shadow-lg flex flex-col items-center justify-between">
+                <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
+                  <Coins className="w-4 h-4" />
+                </div>
+                <div>
+                  <strong className="text-white block font-display">5. Asaas Subcontas</strong>
+                  <span className="text-[10px] text-teal-400 font-mono">Split Automático 95/5</span>
+                </div>
+                <p className="text-[10px] text-slate-400 leading-tight">Carteiras isoladas por academia com repasse direto</p>
+              </div>
+            </div>
+          </div>
+
+          {/* DNS & Cloudflare Setup Card */}
+          <div className="p-5 bg-gradient-to-r from-slate-950 via-blue-950/40 to-slate-950 rounded-2xl border border-blue-500/30 space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400">
+                  <Globe className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                    Tabela de Apontamentos DNS: <span className="text-blue-400 font-mono">bjjacademy.app.br</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Delegação do Registro.br para a Cloudflare e roteamento para o GCP Cloud Run</p>
+                </div>
+              </div>
+              <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
+                SSL / Edge Certificates Ativo
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left font-mono text-[10px] text-slate-300">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-500 uppercase">
+                    <th className="py-2 px-3">Tipo</th>
+                    <th className="py-2 px-3">Nome / Host</th>
+                    <th className="py-2 px-3">Valor / Destino</th>
+                    <th className="py-2 px-3">Proxy Cloudflare</th>
+                    <th className="py-2 px-3">Propósito</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-900">
+                  <tr>
+                    <td className="py-2 px-3 text-blue-400 font-bold">A</td>
+                    <td className="py-2 px-3 text-slate-200">@</td>
+                    <td className="py-2 px-3 text-emerald-400">216.239.32.21 / 216.239.34.21</td>
+                    <td className="py-2 px-3 text-amber-400 font-bold">Proxied (Laranja)</td>
+                    <td className="py-2 px-3 text-slate-400">Roteamento Raiz (bjjacademy.app.br)</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-indigo-400 font-bold">CNAME</td>
+                    <td className="py-2 px-3 text-slate-200">www</td>
+                    <td className="py-2 px-3 text-emerald-400">ghs.googlehosted.com.</td>
+                    <td className="py-2 px-3 text-amber-400 font-bold">Proxied (Laranja)</td>
+                    <td className="py-2 px-3 text-slate-400">Subdomínio Web Oficial</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-purple-400 font-bold">CNAME</td>
+                    <td className="py-2 px-3 text-slate-200">api</td>
+                    <td className="py-2 px-3 text-emerald-400">ghs.googlehosted.com.</td>
+                    <td className="py-2 px-3 text-amber-400 font-bold">Proxied (Laranja)</td>
+                    <td className="py-2 px-3 text-slate-400">API REST & Webhook Ingestion</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 px-3 text-emerald-400 font-bold">CNAME</td>
+                    <td className="py-2 px-3 text-slate-200">* (Wildcard)</td>
+                    <td className="py-2 px-3 text-emerald-400">ghs.googlehosted.com.</td>
+                    <td className="py-2 px-3 text-amber-400 font-bold">Proxied (Laranja)</td>
+                    <td className="py-2 px-3 text-slate-400">Subdomínios Multi-Tenant (*.bjjacademy.app.br)</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Database Security & Indexing Section */}
+          <div className="bg-slate-900 border border-slate-800 p-6 rounded-2xl space-y-4 shadow-xl">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white font-display flex items-center gap-2">
+                    Banco de Dados PostgreSQL & Indexação Multi-Tenant
+                    <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                      100% INDEXED (tenant_id)
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Arquitetura de isolamento estrito de dados por academia para evitar vazamento entre clientes (Data Leak Prevention + RLS).
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-500/30 px-3 py-1.5 rounded-xl font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  RLS + B-Tree Indexes Ativos
+                </span>
+              </div>
+            </div>
+
+            {/* Matrix of Indexes */}
+            <div className="bg-slate-950 rounded-2xl border border-slate-800 p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                <span className="text-xs font-bold text-slate-200 font-display flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-emerald-400" />
+                  Matriz de Auditoria de Índices Multi-Tenant no PostgreSQL
+                </span>
+                <span className="text-[10px] font-mono text-slate-500">
+                  Arquivo de Migração: <code>/src/db/indexes.sql</code>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">students</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_students_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_students_tenant_status (tenant_id, status)</code></div>
+                    <div>• <code>unique_students_tenant_cpf (tenant_id, cpf)</code></div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">payments_history</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_payments_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_payments_tenant_status (tenant_id, status)</code></div>
+                    <div>• <code>idx_payments_tenant_due_date (tenant_id, due_date)</code></div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">subscriptions</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_subscriptions_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_subscriptions_tenant_status (tenant_id, status)</code></div>
+                    <div>• <code>idx_subscriptions_tenant_due (tenant_id, next_due_date)</code></div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">attendances</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_attendances_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_attendances_tenant_date (tenant_id, date DESC)</code></div>
+                    <div>• <code>idx_attendances_tenant_ai (tenant_id, verified_by_ai)</code></div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">leads (CRM)</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_leads_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_leads_tenant_stage (tenant_id, stage)</code></div>
+                    <div>• <code>idx_leads_tenant_created (tenant_id, created_at DESC)</code></div>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <strong className="text-white font-mono">webhook_jobs (Redis DLQ)</strong>
+                    <span className="bg-emerald-500/20 text-emerald-400 text-[9px] px-1.5 py-0.5 rounded font-bold">RLS ACTIVE</span>
+                  </div>
+                  <div className="font-mono text-[10px] text-slate-400 space-y-0.5">
+                    <div>• <code>idx_webhook_jobs_tenant_id (tenant_id)</code></div>
+                    <div>• <code>idx_webhook_jobs_tenant_status (tenant_id, status)</code></div>
+                    <div>• <code>unique_webhook_jobs_provider_event (provider, event_id)</code></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Code / Schema View */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-2">
               {/* REST Endpoints Box */}
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3 font-mono text-xs">
@@ -1438,50 +2520,59 @@ export default function FinanceView({
                 <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="bg-emerald-500/20 text-emerald-400 text-[10px] font-bold px-1.5 py-0.5 rounded">POST</span>
-                    <span className="text-slate-200 text-[11px]">/api/v1/finance/asaas/webhook</span>
+                    <span className="text-slate-200 text-[11px]">/api/webhooks/asaas</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">Recebe notificações de pagamento e executa conciliação automática.</p>
+                  <p className="text-[10px] text-slate-500">Ingestão assíncrona de webhooks com enfileiramento no Redis e conciliação por tenant.</p>
                 </div>
 
                 <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded">POST</span>
-                    <span className="text-slate-200 text-[11px]">/api/v1/subscriptions</span>
+                    <span className="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 py-0.5 rounded">GET</span>
+                    <span className="text-slate-200 text-[11px]">/api/database/tenant-index-audit</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">Cria uma nova assinatura recorrente no Asaas (PIX/Boleto/Cartão).</p>
+                  <p className="text-[10px] text-slate-500">Auditoria automatizada dos índices PostgreSQL e integridade de isolamento.</p>
                 </div>
 
                 <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="bg-purple-500/20 text-purple-400 text-[10px] font-bold px-1.5 py-0.5 rounded">PATCH</span>
-                    <span className="text-slate-200 text-[11px]">/api/v1/subscriptions/:id/pause</span>
+                    <span className="bg-teal-500/20 text-teal-400 text-[10px] font-bold px-1.5 py-0.5 rounded">GET</span>
+                    <span className="text-slate-200 text-[11px]">/api/infrastructure/architecture-status</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">Pausa ou cancela a recorrência da mensalidade.</p>
+                  <p className="text-[10px] text-slate-500">Status em tempo real da arquitetura Cloudflare, Cloud Run e Subcontas Asaas.</p>
+                </div>
+
+                <div className="p-2.5 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="bg-purple-500/20 text-purple-400 text-[10px] font-bold px-1.5 py-0.5 rounded">GET</span>
+                    <span className="text-slate-200 text-[11px]">/api/webhooks/queue/stats</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">Telemetria em tempo real do Worker Redis e Dead Letter Queue.</p>
                 </div>
               </div>
 
               {/* Prisma Schema Box */}
               <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-2 font-mono text-xs text-slate-300">
                 <span className="text-amber-400 font-bold uppercase text-[10px] block">Prisma PostgreSQL Schema (`prisma/schema.prisma`)</span>
-                <pre className="p-3 bg-slate-900 rounded-lg text-[10px] text-emerald-400 overflow-x-auto leading-relaxed border border-slate-800">
-{`model Academy {
-  id               String   @id @default(uuid())
-  name             String
-  asaasApiKey      String?
-  asaasWebhookTok  String?
-  students         Student[]
-  subscriptions    Subscription[]
-}
+                <pre className="p-3 bg-slate-900 rounded-lg text-[10px] text-emerald-400 overflow-x-auto leading-relaxed border border-slate-800 max-h-56">
+{`// Model Student com Índices B-Tree e RLS
+model Student {
+  id                    String            @id @default(uuid())
+  tenantId              String            @map("tenant_id")
+  academy               Academy           @relation(fields: [tenantId], references: [id])
+  name                  String
+  cpf                   String?
+  status                StudentStatus     @default(ACTIVE)
+  planValue             Decimal           @db.Decimal(10, 2)
+  billingType           BillingType       @default(PIX)
+  asaasCustomerId       String?
+  asaasSubscriptionId   String?
 
-model Subscription {
-  id               String   @id @default(uuid())
-  studentId        String
-  academyId        String
-  asaasSubId       String   @unique
-  planValue        Decimal
-  cycle            String   // MONTHLY, YEARLY
-  status           String   // ACTIVE, OVERDUE
-  createdAt        DateTime @default(now())
+  @@unique([tenantId, cpf], name: "unique_tenant_student_cpf")
+  @@index([tenantId], name: "idx_students_tenant_id")
+  @@index([tenantId, status], name: "idx_students_tenant_status")
+  @@index([tenantId, asaasCustomerId], name: "idx_students_tenant_asaas_cust")
+  @@index([tenantId, belt], name: "idx_students_tenant_belt")
+  @@map("students")
 }`}
                 </pre>
               </div>

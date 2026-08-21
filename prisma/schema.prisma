@@ -1,0 +1,379 @@
+// Prisma Schema for BJJ Academy SaaS Platform
+// Database: PostgreSQL with Strict Multi-Tenant Indexing & Row-Level Security (RLS)
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  GESTOR_ACADEMIA
+  PROFESSOR
+  RECEPCAO
+  ALUNO
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  OVERDUE
+  SUSPENDED
+}
+
+enum PaymentStatus {
+  RECEIVED
+  CONFIRMED
+  PENDING
+  OVERDUE
+  REFUNDED
+}
+
+enum BillingType {
+  PIX
+  BOLETO
+  CREDIT_CARD
+}
+
+// ==========================================
+// 1. TENANT (ACADEMY / UNIDADE)
+// ==========================================
+model Academy {
+  id                   String            @id @default(uuid())
+  name                 String
+  unit                 String
+  cnpj                 String?           @unique
+  subdomain            String?           @unique
+  plan                 String            @default("Pro") // Starter, Pro, Enterprise
+  status               String            @default("ACTIVE") // ACTIVE, SUSPENDED, TRIAL
+  
+  // Gateways & PSP Subaccounts (Asaas / Mercado Pago / Stripe)
+  asaasApiKey          String?
+  asaasWalletId        String?
+  asaasWebhookSecret   String?
+  splitPercent         Decimal           @default(5.00) @db.Decimal(5, 2) // SaaS platform fee %
+  
+  // Relacionamentos com dados isolados
+  instructors          Instructor[]
+  students             Student[]
+  subscriptions        Subscription[]
+  payments             PaymentHistory[]
+  attendances          Attendance[]
+  leads                Lead[]
+  classSchedules       ClassSchedule[]
+  accountsPayable      AccountsPayable[]
+  auditLogs            AuditLog[]
+  webhookJobs          WebhookJob[]
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([status])
+  @@index([subdomain])
+  @@map("academies")
+}
+
+// ==========================================
+// 2. INSTRUCTORS & USERS (ISOLADO POR TENANT)
+// ==========================================
+model Instructor {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id") // Foreign key to Academy.id
+  academy      Academy   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  name         String
+  email        String
+  phone        String?
+  role         UserRole  @default(PROFESSOR)
+  belt         String    @default("Black")
+  degrees      Int       @default(0)
+  birthDate    String?
+  status       String    @default("Active")
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES (Prevent Cross-Tenant Leaks)
+  @@unique([tenantId, email], name: "unique_tenant_user_email")
+  @@index([tenantId], name: "idx_instructors_tenant_id")
+  @@index([tenantId, role], name: "idx_instructors_tenant_role")
+  @@index([tenantId, status], name: "idx_instructors_tenant_status")
+  @@map("instructors")
+}
+
+// ==========================================
+// 3. STUDENTS (ISOLADO POR TENANT)
+// ==========================================
+model Student {
+  id                    String            @id @default(uuid())
+  tenantId              String            @map("tenant_id") // Foreign key to Academy.id
+  academy               Academy           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name                  String
+  email                 String
+  phone                 String
+  cpf                   String?
+  birthDate             String?
+  belt                  String            @default("Branca")
+  degrees               Int               @default(0)
+  status                StudentStatus     @default(ACTIVE)
+  attendanceCount       Int               @default(0)
+  totalClassesMonth     Int               @default(0)
+  plan                  String            @default("Mensal")
+  planValue             Decimal           @default(220.00) @db.Decimal(10, 2)
+  billingType           BillingType       @default(PIX)
+  
+  // Integração Asaas PSP
+  asaasCustomerId       String?
+  asaasSubscriptionId   String?
+  lastPaymentDate       DateTime?
+  nextDueDate           DateTime?
+  
+  // Relacionamentos
+  subscriptions         Subscription[]
+  payments              PaymentHistory[]
+  attendances           Attendance[]
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES & COMPOSITE INDEXES
+  @@unique([tenantId, cpf], name: "unique_tenant_student_cpf")
+  @@index([tenantId], name: "idx_students_tenant_id")
+  @@index([tenantId, status], name: "idx_students_tenant_status")
+  @@index([tenantId, asaasCustomerId], name: "idx_students_tenant_asaas_cust")
+  @@index([tenantId, asaasSubscriptionId], name: "idx_students_tenant_asaas_sub")
+  @@index([tenantId, belt], name: "idx_students_tenant_belt")
+  @@index([tenantId, createdAt(sort: Desc)], name: "idx_students_tenant_created_desc")
+  @@map("students")
+}
+
+// ==========================================
+// 4. SUBSCRIPTIONS & MENSALIDADES (ISOLADO POR TENANT)
+// ==========================================
+model Subscription {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  studentId            String          @map("student_id")
+  student              Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  asaasSubId           String          @unique @map("asaas_sub_id")
+  planName             String
+  planValue            Decimal         @db.Decimal(10, 2)
+  billingType          BillingType     @default(PIX)
+  cycle                String          @default("MONTHLY") // MONTHLY, QUARTERLY, SEMIANNUAL, YEARLY
+  status               String          @default("ACTIVE") // ACTIVE, OVERDUE, SUSPENDED, CANCELED
+  nextDueDate          DateTime
+  
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES
+  @@index([tenantId], name: "idx_subscriptions_tenant_id")
+  @@index([tenantId, status], name: "idx_subscriptions_tenant_status")
+  @@index([tenantId, studentId], name: "idx_subscriptions_tenant_student")
+  @@index([tenantId, nextDueDate], name: "idx_subscriptions_tenant_due_date")
+  @@map("subscriptions")
+}
+
+// ==========================================
+// 5. PAYMENT HISTORY & INVOICES (ISOLADO POR TENANT)
+// ==========================================
+model PaymentHistory {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  studentId            String          @map("student_id")
+  student              Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  amount               Decimal         @db.Decimal(10, 2)
+  netAmount            Decimal?        @db.Decimal(10, 2)
+  platformFee          Decimal?        @db.Decimal(10, 2) // Retenção do SaaS
+  
+  method               BillingType     @default(PIX)
+  status               PaymentStatus   @default(RECEIVED)
+  dueDate              DateTime
+  paymentDate          DateTime?
+  
+  asaasPaymentId       String?         @unique @map("asaas_payment_id")
+  pixQrCode            String?         @db.Text
+  pixCopiaECola        String?         @db.Text
+  invoiceUrl           String?
+  
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES & COMPOSITE FINANCIAL INDEXES
+  @@index([tenantId], name: "idx_payments_tenant_id")
+  @@index([tenantId, status], name: "idx_payments_tenant_status")
+  @@index([tenantId, dueDate], name: "idx_payments_tenant_due_date")
+  @@index([tenantId, paymentDate], name: "idx_payments_tenant_payment_date")
+  @@index([tenantId, studentId], name: "idx_payments_tenant_student")
+  @@index([tenantId, asaasPaymentId], name: "idx_payments_tenant_asaas_id")
+  @@index([tenantId, createdAt(sort: Desc)], name: "idx_payments_tenant_created_desc")
+  @@map("payments_history")
+}
+
+// ==========================================
+// 6. ATTENDANCES & TATAME CHECK-INS (ISOLADO POR TENANT)
+// ==========================================
+model Attendance {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  studentId            String          @map("student_id")
+  student              Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  classScheduleId      String?         @map("class_schedule_id")
+  date                 DateTime        @default(now())
+  verifiedByAi         Boolean         @default(false)
+  techniqueSummary     String?
+  
+  createdAt            DateTime        @default(now())
+
+  // STRICT MULTI-TENANT INDEXES
+  @@index([tenantId], name: "idx_attendances_tenant_id")
+  @@index([tenantId, date(sort: Desc)], name: "idx_attendances_tenant_date")
+  @@index([tenantId, studentId], name: "idx_attendances_tenant_student")
+  @@index([tenantId, verifiedByAi], name: "idx_attendances_tenant_ai")
+  @@map("attendances")
+}
+
+// ==========================================
+// 7. CRM LEADS & AULAS EXPERIMENTAIS (ISOLADO POR TENANT)
+// ==========================================
+model Lead {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name                 String
+  phone                String
+  email                String?
+  source               String          @default("Instagram")
+  stage                String          @default("Novo Lead") // Novo Lead, Contato Feito, Aula Agendada, Converteu, Perdido
+  scheduledDate        String?
+  lastContactDate      DateTime?
+  notes                String?
+
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES
+  @@index([tenantId], name: "idx_leads_tenant_id")
+  @@index([tenantId, stage], name: "idx_leads_tenant_stage")
+  @@index([tenantId, createdAt(sort: Desc)], name: "idx_leads_tenant_created")
+  @@map("leads")
+}
+
+// ==========================================
+// 8. CLASS SCHEDULES & GRADES DE HORÁRIO (ISOLADO POR TENANT)
+// ==========================================
+model ClassSchedule {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  dayOfWeek            String          // Segunda, Terça, Quarta, etc.
+  time                 String          // 19:00 - 20:30
+  category             String          // Adulto, Kids, No-Gi, Competição
+  level                String          // Todos os Níveis, Avançado
+  instructorName       String
+  maxCapacity          Int             @default(30)
+
+  createdAt            DateTime        @default(now())
+
+  @@index([tenantId], name: "idx_classes_tenant_id")
+  @@index([tenantId, dayOfWeek], name: "idx_classes_tenant_day")
+  @@map("class_schedules")
+}
+
+// ==========================================
+// 9. CONTAS A PAGAR / DESPESAS (ISOLADO POR TENANT)
+// ==========================================
+model AccountsPayable {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  description          String
+  supplier             String
+  amount               Decimal         @db.Decimal(10, 2)
+  category             String          // Aluguel, Salários, Luz/Água, Equipamentos
+  dueDate              DateTime
+  paymentDate          DateTime?
+  status               String          @default("PENDING") // PENDING, PAID, OVERDUE
+
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  // STRICT MULTI-TENANT INDEXES
+  @@index([tenantId], name: "idx_payables_tenant_id")
+  @@index([tenantId, status, dueDate], name: "idx_payables_tenant_status_due")
+  @@map("accounts_payable")
+}
+
+// ==========================================
+// 10. AUDIT LOGS (TRILHA DE SEGURANÇA IMUTÁVEL POR TENANT)
+// ==========================================
+model AuditLog {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId               String?         @map("user_id")
+  userName             String
+  userRole             String
+  action               String          // SPLIT_PROCESSED, GATEWAY_UPDATED, STUDENT_CREATED
+  entity               String          // Student, Payment, GatewayAdapter
+  entityId             String          @map("entity_id")
+  details              String          @db.Text
+  ipAddress            String?         @map("ip_address")
+
+  createdAt            DateTime        @default(now())
+
+  // STRICT MULTI-TENANT INDEXES
+  @@index([tenantId], name: "idx_audit_logs_tenant_id")
+  @@index([tenantId, createdAt(sort: Desc)], name: "idx_audit_logs_tenant_created")
+  @@index([tenantId, entity, entityId], name: "idx_audit_logs_tenant_entity")
+  @@map("audit_logs")
+}
+
+// ==========================================
+// 11. REDIS WEBHOOK JOBS & DLQ (AUDITORIA & REPLAY POR TENANT)
+// ==========================================
+model WebhookJob {
+  id                   String          @id @default(uuid())
+  tenantId             String          @map("tenant_id")
+  academy              Academy         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  provider             String          // Asaas, MercadoPago, Stripe
+  eventId              String          @map("event_id")
+  eventType            String          @map("event_type")
+  idempotencyKey       String          @unique @map("idempotency_key")
+  payload              Json
+  status               String          @default("QUEUED") // QUEUED, PROCESSING, COMPLETED, DEAD_LETTER
+  attempts             Int             @default(0)
+  maxAttempts          Int             @default(3)
+  executionTimeMs      Int?            @map("execution_time_ms")
+  actionTaken          String?         @map("action_taken")
+  error                String?
+
+  enqueuedAt           DateTime        @default(now()) @map("enqueued_at")
+  processedAt          DateTime?       @map("processed_at")
+
+  // STRICT MULTI-TENANT & IDEMPOTENCY INDEXES
+  @@unique([provider, eventId], name: "unique_provider_event_id")
+  @@index([tenantId], name: "idx_webhook_jobs_tenant_id")
+  @@index([tenantId, status], name: "idx_webhook_jobs_tenant_status")
+  @@index([tenantId, enqueuedAt(sort: Desc)], name: "idx_webhook_jobs_tenant_enqueued")
+  @@map("webhook_jobs")
+}

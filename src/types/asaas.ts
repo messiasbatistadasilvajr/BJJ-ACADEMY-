@@ -77,7 +77,7 @@ export interface AsaasFinancialMetrics {
 
 export interface AsaasWebhookEvent {
   id: string;
-  event: "PAYMENT_RECEIVED" | "PAYMENT_OVERDUE" | "PAYMENT_DUEDATE_WARNING" | "PAYMENT_CREATED" | "PAYMENT_DELETED";
+  event: "PAYMENT_RECEIVED" | "PAYMENT_OVERDUE" | "PAYMENT_DUEDATE_WARNING" | "PAYMENT_CREATED" | "PAYMENT_DELETED" | "TRANSFER_DONE";
   timestamp: string;
   invoiceId: string;
   studentName: string;
@@ -87,3 +87,51 @@ export interface AsaasWebhookEvent {
   payload: any;
   status: "PROCESSED" | "FAILED";
 }
+
+export interface AsaasSubaccountInfo {
+  id: string; // e.g. "subacc_gracie_01"
+  academyId: string;
+  academyName: string;
+  cnpjOrCpf: string;
+  walletId: string; // e.g. "wal_889210041"
+  apiKeyMasked: string;
+  status: "ACTIVE" | "PENDING_DOCUMENTATION" | "SUSPENDED";
+  balanceTotal: number;
+  balanceAvailable: number;
+  balancePending: number;
+  splitPercentageAcademy: number; // e.g. 95%
+  splitPercentagePlatform: number; // e.g. 5%
+  autoTransferDaily: boolean;
+  bankAccount: {
+    bankName: string;
+    agency: string;
+    accountNumber: string;
+    accountType: "CONTA_CORRENTE" | "CONTA_POUPANCA";
+    pixKey?: string;
+  };
+}
+
+export interface AsaasSplitDetail {
+  invoiceId: string;
+  totalGrossAmount: number;
+  academyNetAmount: number; // 95%
+  platformFeeAmount: number; // 5%
+  gatewayFeeAsaas: number; // R$ 0.99 or 1.99%
+  recipientWalletId: string;
+  platformWalletId: string;
+  status: "DONE" | "PENDING_SETTLEMENT";
+}
+
+export interface CloudflareArchitectureStatus {
+  domain: string; // "bjjacademy.app.br"
+  apiDomain: string; // "api.bjjacademy.app.br"
+  cloudflareStatus: "Active" | "Proxied" | "DNS_Only";
+  sslMode: "Full (Strict)";
+  wafStatus: "Active - OWASP & Rate Limiting";
+  cloudRunService: "bjj-academy-production (us-east1)";
+  redisConnection: "Upstash / Cloud MemoryStore (Active)";
+  postgresqlStatus: "PostgreSQL 16 with RLS Enabled";
+  activeTenantsCount: number;
+  subdomainsCount: number;
+}
+
