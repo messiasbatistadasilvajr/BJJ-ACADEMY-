@@ -4,8 +4,8 @@ export const initialInstructors: Instructor[] = [
   {
     id: "inst-1",
     academyId: "ac-2",
-    name: "Mestre Marcelo",
-    email: "marcelo@bjjacademy.com",
+    name: "Messias Batista",
+    email: "messiasbjunior76@gmail.com",
     phone: "+55 (11) 98111-2233",
     belt: "Black",
     birthDate: "1975-07-21", // Birthday is Today (July 21)

@@ -40,6 +40,8 @@ export interface Student {
   cpf?: string;
   plan?: SubscriptionPlan;
   planValue?: number;
+  paymentDueDay?: number; // Dia de vencimento todo mês (ex: 5, 10, 15, 20, 25)
+  nextPaymentDate?: string; // Data de vencimento no mês seguinte (ex: 2026-09-10)
   belt: BeltColor;
   stripes: number; // 0 to 4
   attendance30Days: number;
@@ -51,6 +53,7 @@ export interface Student {
   category?: "Adulto" | "Kids / Infantil";
   guardianName?: string;
   guardianPhone?: string;
+  guardianEmail?: string;
   guardianNotes?: string;
   studyPlanAssigned?: boolean;
   asaasCustomerId?: string;
@@ -60,6 +63,7 @@ export interface Student {
   loyaltyTier?: "Bronze" | "Prata" | "Ouro" | "Black Belt VIP";
   referralCode?: string;
   badges?: string[];
+  notes?: string;
 }
 
 export interface LoyaltyReward {
@@ -109,15 +113,25 @@ export interface PaymentHistory {
   studentId: string;
   studentName: string;
   amount: number;
+  originalAmount?: number;
   date: string;
+  dueDate?: string;
+  paidDate?: string;
   status: "Paid" | "Pending" | "Failed" | "Overdue";
   method: PaymentBillingType;
   asaasInvoiceId?: string;
   pixCopiaECola?: string;
   bankSlipUrl?: string;
-  dueDate?: string;
-  fineAmount?: number;
-  interestAmount?: number;
+  fineAmount?: number; // Multa de 2%
+  interestAmount?: number; // Juros de 0.033%/dia (1% ao mês)
+  daysOverdue?: number; // Quantidade de dias em atraso
+  updatedTotalAmount?: number; // Valor refeito = original + multa + juros
+  recipientName?: string; // Nome do aluno ou do pai/responsável
+  recipientPhone?: string; // WhatsApp de destino para a cobrança
+  recipientType?: "STUDENT" | "GUARDIAN";
+  lastNotifiedAt?: string; // Timestamp do último envio via WhatsApp/Mensagens
+  notificationCount?: number; // Quantidade de notificações disparadas
+  notes?: string;
 }
 
 // ASAAS & MULTI-PROVIDER DATABASE SCHEMAS
@@ -150,13 +164,24 @@ export interface AccountsReceivable {
   asaasInvoiceId?: string;
 }
 
+export interface PixConfig {
+  pixKeyType: "EMAIL" | "CPF_CNPJ" | "PHONE" | "RANDOM_EVP";
+  pixKey: string;
+  receiverName: string;
+  receiverCity: string;
+  bankName: string;
+  description: string;
+  autoIncludeInInvoices: boolean;
+  autoIncludeInWhatsApp: boolean;
+}
+
 export interface AuditLog {
   id: string;
   academyId: string;
   timestamp: string;
   userName: string;
   userRole: UserRole;
-  action: "CREATE_CUSTOMER" | "CREATE_SUBSCRIPTION" | "PAUSE_SUBSCRIPTION" | "REACTIVATE_SUBSCRIPTION" | "CANCEL_SUBSCRIPTION" | "PROCESS_WEBHOOK" | "UPDATE_GATEWAY" | "ADD_ACCOUNT_PAYABLE" | "MANUAL_BAIXA" | "EMIT_RECEIPT";
+  action: "CREATE_CUSTOMER" | "CREATE_SUBSCRIPTION" | "PAUSE_SUBSCRIPTION" | "REACTIVATE_SUBSCRIPTION" | "CANCEL_SUBSCRIPTION" | "UPDATE_SUBSCRIPTION" | "PROCESS_WEBHOOK" | "UPDATE_GATEWAY" | "ADD_ACCOUNT_PAYABLE" | "MANUAL_BAIXA" | "EMIT_RECEIPT" | "DISPARO_WHATSAPP" | "DISPARO_CRM" | "RECALCULATE_LATE_FEE" | "UPDATE_PIX_CONFIG";
   entity: string;
   entityId: string;
   details: string;
@@ -295,6 +320,8 @@ export interface GraduationCandidate {
   attendanceCount: number;
   monthsInCurrentBelt: number;
   status: "Eligible" | "Approved" | "Pending Exam";
+  targetBelt?: BeltColor;
+  targetStripes?: number;
 }
 
 export interface MarketingCampaign {
@@ -380,6 +407,96 @@ export interface AcademyPost {
   createdAt: string;
   interestedStudentIds: string[];
   viewsCount: number;
+}
+
+// UNIVERSAL DATA MIGRATION ENGINE (STAGING, MAPPING, VALIDATION, CHECKPOINTS, AUDIT)
+export interface MigrationFieldMapping {
+  name: string; // Target field in BJJ Academy schema
+  sourceHeader: string; // Header name in spreadsheet/CSV
+  confidence?: number;
+  sampleValue?: string;
+  aiSuggested?: boolean;
+}
+
+export interface MigrationStagingRow {
+  rowNumber: number;
+  raw: Record<string, string>;
+  normalized: Partial<Student> & {
+    guardianName?: string;
+    guardianPhone?: string;
+    guardianEmail?: string;
+    initialBelt?: BeltColor;
+    initialStripes?: number;
+    planName?: SubscriptionPlan;
+    planValue?: number;
+    paymentDueDay?: number;
+    paymentStatus?: "Paid" | "Overdue" | "Pending";
+    historicalPaymentsCount?: number;
+    totalHistoricalPaid?: number;
+    notes?: string;
+  };
+  validationErrors: string[];
+  validationWarnings: string[];
+  isValid: boolean;
+  duplicateStatus: "NONE" | "EXACT_CPF" | "EXACT_EMAIL" | "SIMILAR_NAME";
+  duplicateTargetStudentId?: string;
+  duplicateResolution: "IMPORT_NEW" | "UPDATE_EXISTING" | "SKIP";
+}
+
+export interface MigrationCheckpoint {
+  id: string;
+  timestamp: string;
+  tenantId: string;
+  tenantName: string;
+  author: string;
+  fileName: string;
+  totalBeforeStudents: number;
+  totalBeforePayments: number;
+  totalBeforeGraduations: number;
+  snapshotStudents: Student[];
+  snapshotPayments: PaymentHistory[];
+  snapshotGraduations: GraduationCandidate[];
+  snapshotState: {
+    students: Student[];
+    payments: PaymentHistory[];
+    graduations: GraduationCandidate[];
+  };
+}
+
+export interface MigrationReport {
+  id: string;
+  fileName: string;
+  fileSizeFormatted: string;
+  startedAt: string;
+  completedAt: string;
+  tenantId: string;
+  tenantName: string;
+  author: string;
+  totalFound: number;
+  totalImported: number;
+  totalUpdated: number;
+  totalDuplicatesSkipped: number;
+  totalErrors: number;
+  status: "CONCLUDED_SUCCESS" | "CONCLUDED_WITH_WARNINGS" | "FAILED" | "ROLLED_BACK";
+  createdInvoicesCount: number;
+  createdHistoricalCount: number;
+  checkpointId: string;
+  details: {
+    rowNumber: number;
+    studentName: string;
+    action: "CREATED" | "UPDATED" | "SKIPPED" | "ERROR";
+    message: string;
+  }[];
+}
+
+export interface MigrationSettings {
+  targetAcademyId: string;
+  duplicateStrategy: "SKIP" | "UPDATE" | "CREATE_NEW";
+  financialStrategy: "HISTORICAL_AND_FUTURE_RECURRENCE" | "HISTORICAL_ONLY" | "NO_FINANCIAL";
+  defaultDueDay: number;
+  defaultPlan: SubscriptionPlan;
+  defaultPlanValue: number;
+  createAsaasRecurrence: boolean;
 }
 
 

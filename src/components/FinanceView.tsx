@@ -3,7 +3,7 @@ import {
   PaymentHistory, Student, Academy, AsaasWebhookEvent, PaymentProvider, 
   PaymentBillingType, SubscriptionPlan, AccountsPayable, AccountsReceivable, 
   AuditLog, GatewayAdapterConfig, UserRole, SaasPlatformInvoice,
-  RedisWebhookJob, RedisQueueStats
+  RedisWebhookJob, RedisQueueStats, PixConfig
 } from "../types";
 import { 
   CreditCard, TrendingUp, DollarSign, ArrowUpRight, 
@@ -13,7 +13,7 @@ import {
   PauseCircle, PlayCircle, Ban, Layers, ShieldCheck, Database, Code, FileSpreadsheet,
   Download, ArrowDownRight, Tag, Shield, Terminal, CheckSquare, PlusCircle,
   Activity, Cpu, RotateCcw, Server, Inbox, Play, CheckCheck, Globe,
-  Cloud, Lock, Workflow, ArrowRight, Coins, Percent
+  Cloud, Lock, Workflow, ArrowRight, Coins, Percent, MessageSquare
 } from "lucide-react";
 import { 
   initialSubaccounts, calculateAsaasSplit, generateAsaasPaymentLink,
@@ -481,6 +481,20 @@ export default function FinanceView({
     phone?: string;
   } | null>(null);
 
+  // Late Fee & Notification Modal States
+  const [showSendNotificationModal, setShowSendNotificationModal] = useState(false);
+  const [selectedPaymentForNotification, setSelectedPaymentForNotification] = useState<PaymentHistory | null>(null);
+  const [notificationStudent, setNotificationStudent] = useState<Student | null>(null);
+  const [notificationRecipientName, setNotificationRecipientName] = useState("");
+  const [notificationRecipientPhone, setNotificationRecipientPhone] = useState("");
+  const [notificationRecipientType, setNotificationRecipientType] = useState<"STUDENT" | "GUARDIAN">("STUDENT");
+  const [notificationMessageText, setNotificationMessageText] = useState("");
+  const [notificationOverdueDays, setNotificationOverdueDays] = useState(0);
+  const [notificationFineAmount, setNotificationFineAmount] = useState(0);
+  const [notificationInterestAmount, setNotificationInterestAmount] = useState(0);
+  const [notificationUpdatedTotal, setNotificationUpdatedTotal] = useState(0);
+  const [notificationPixCode, setNotificationPixCode] = useState("");
+
   // New Student Form State
   const [newStudentForm, setNewStudentForm] = useState({
     name: "",
@@ -489,6 +503,10 @@ export default function FinanceView({
     email: "",
     plan: "Mensal" as SubscriptionPlan,
     planValue: 220,
+    paymentDueDay: 10,
+    category: "Adulto" as "Adulto" | "Kids / Infantil",
+    guardianName: "",
+    guardianPhone: "",
     billingType: "PIX" as PaymentBillingType,
     belt: "White" as Student["belt"],
     academyId: academies[0]?.id || "ac-1"
@@ -515,6 +533,60 @@ export default function FinanceView({
   const [pixAmount, setPixAmount] = useState<number>(220);
   const [pixGeneratedCode, setPixGeneratedCode] = useState<string>("");
   const [copied, setCopied] = useState(false);
+
+  // PIX Platform / Billing Configuration State with LocalStorage Persistence
+  const defaultPixConfig: PixConfig = {
+    pixKeyType: "CPF_CNPJ",
+    pixKey: "58087630378",
+    receiverName: "Messias B. Junior - BJJ Academy",
+    receiverCity: "São Paulo",
+    bankName: "Asaas / Nu Pagamentos",
+    description: "Fatura de Mensalidade BJJ Academy",
+    autoIncludeInInvoices: true,
+    autoIncludeInWhatsApp: true
+  };
+
+  const [pixConfig, setPixConfig] = useState<PixConfig>(() => {
+    try {
+      const saved = localStorage.getItem("bjj_custom_pix_config");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // If it was the placeholder email, automatically update to user's registered CPF
+        if (parsed.pixKey === "messiasbjunior76@gmail.com" || !parsed.pixKey) {
+          return defaultPixConfig;
+        }
+        return parsed;
+      }
+      return defaultPixConfig;
+    } catch {
+      return defaultPixConfig;
+    }
+  });
+
+  const [showPixConfigModal, setShowPixConfigModal] = useState(false);
+  const [pixConfigForm, setPixConfigForm] = useState<PixConfig>(pixConfig);
+
+  // Sync PIX config to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem("bjj_custom_pix_config", JSON.stringify(pixConfig));
+    } catch (e) {
+      console.error("Failed to save pix config to localStorage", e);
+    }
+  }, [pixConfig]);
+
+  const handleSavePixConfig = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPixConfig(pixConfigForm);
+    setShowPixConfigModal(false);
+    pushAudit(
+      "UPDATE_PIX_CONFIG",
+      "PixBillingConfig",
+      pixConfigForm.pixKey,
+      `Chave PIX atualizada para: [${pixConfigForm.pixKeyType}] ${pixConfigForm.pixKey} - Titular: ${pixConfigForm.receiverName} (${pixConfigForm.bankName})`
+    );
+    triggerToast(`✅ Chave PIX (${pixConfigForm.pixKey}) salva com sucesso na área de cobrança!`);
+  };
 
   // Helper Toast
   const triggerToast = (msg: string) => {
@@ -683,7 +755,198 @@ export default function FinanceView({
     triggerToast(message);
   };
 
-  // Register Asaas Student
+  // Helper: Calculate Late Fee (2%) & Interest (0.033%/day)
+  const calculatePaymentDetails = (payment: PaymentHistory, student?: Student) => {
+    const today = new Date();
+    const dueDateStr = payment.dueDate || student?.nextPaymentDate || payment.date;
+    const dueDateObj = new Date(dueDateStr);
+    
+    // Calculate difference in days
+    const diffTime = today.getTime() - dueDateObj.getTime();
+    const rawDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    const isOverdue = (payment.status === "Pending" || payment.status === "Overdue" || student?.paymentStatus === "Overdue") && rawDays > 0;
+    const daysOverdue = isOverdue ? Math.max(1, rawDays) : (payment.daysOverdue || 0);
+
+    const baseAmount = payment.amount || student?.planValue || 220;
+    // 2.0% Fine (Multa)
+    const fineRate = 0.02;
+    const fineAmount = isOverdue ? Number((baseAmount * fineRate).toFixed(2)) : (payment.fineAmount || 0);
+    // 0.033% Daily Interest (Juros de Mora ~1% ao mês)
+    const dailyInterestRate = 0.00033;
+    const interestAmount = isOverdue ? Number((baseAmount * dailyInterestRate * daysOverdue).toFixed(2)) : (payment.interestAmount || 0);
+    const updatedTotal = Number((baseAmount + fineAmount + interestAmount).toFixed(2));
+
+    // Determine Recipient (Student vs Guardian/Parents)
+    const hasGuardian = Boolean(student?.guardianName && student?.guardianPhone) || (student?.category === "Kids / Infantil");
+    const recipientName = hasGuardian ? (student?.guardianName || "Responsável Legal") : (student?.name || payment.studentName);
+    const recipientPhone = hasGuardian ? (student?.guardianPhone || student?.phone || "") : (student?.phone || "");
+    const recipientType: "STUDENT" | "GUARDIAN" = hasGuardian ? "GUARDIAN" : "STUDENT";
+
+    const dueDateFormatted = dueDateObj.toLocaleDateString("pt-BR", { timeZone: "UTC" });
+
+    return {
+      isOverdue,
+      daysOverdue,
+      baseAmount,
+      fineAmount,
+      interestAmount,
+      updatedTotal,
+      dueDateFormatted,
+      recipientName,
+      recipientPhone,
+      recipientType,
+      dueDateStr
+    };
+  };
+
+  // Recalculate and Regenerate Dynamic PIX with Interest
+  const handleRecalculateOverdueWithInterest = (payment: PaymentHistory, student?: Student) => {
+    const details = calculatePaymentDetails(payment, student);
+    const updatedPix = `00020101021226830014br.gov.bcb.pix2561api.asaas.com/v3/pix/qr/pay_${payment.id}_tot_${details.updatedTotal.toFixed(2).replace('.', '')}_${Math.floor(Math.random()*10000)}`;
+
+    const updatedPayment: PaymentHistory = {
+      ...payment,
+      status: "Overdue",
+      daysOverdue: details.daysOverdue,
+      fineAmount: details.fineAmount,
+      interestAmount: details.interestAmount,
+      updatedTotalAmount: details.updatedTotal,
+      pixCopiaECola: updatedPix,
+      recipientName: details.recipientName,
+      recipientPhone: details.recipientPhone,
+      recipientType: details.recipientType
+    };
+
+    onAddPayment(updatedPayment);
+
+    if (student && onUpdateStudent) {
+      onUpdateStudent({
+        ...student,
+        paymentStatus: "Overdue"
+      });
+    }
+
+    pushAudit(
+      "UPDATE_SUBSCRIPTION",
+      "PaymentHistory",
+      payment.id,
+      `Cobrança recalculada com juros de mora: Aluno ${payment.studentName}. Valor original: R$ ${details.baseAmount}, Multa (2%): R$ ${details.fineAmount}, Juros (${details.daysOverdue} dias): R$ ${details.interestAmount}. Total: R$ ${details.updatedTotal.toFixed(2)}.`
+    );
+
+    triggerToast(`⚡ Cobrança de ${payment.studentName} recalculada com juros! Novo total: R$ ${details.updatedTotal.toFixed(2)} (Multa R$ ${details.fineAmount.toFixed(2)} + Juros R$ ${details.interestAmount.toFixed(2)})`);
+  };
+
+  // Open Send Notification / WhatsApp Modal
+  const handleOpenNotificationModal = (payment: PaymentHistory, student?: Student) => {
+    const details = calculatePaymentDetails(payment, student);
+    setSelectedPaymentForNotification(payment);
+    setNotificationStudent(student || null);
+    setNotificationRecipientName(details.recipientName);
+    setNotificationRecipientPhone(details.recipientPhone);
+    setNotificationRecipientType(details.recipientType);
+    setNotificationOverdueDays(details.daysOverdue);
+    setNotificationFineAmount(details.fineAmount);
+    setNotificationInterestAmount(details.interestAmount);
+    setNotificationUpdatedTotal(details.updatedTotal);
+
+    const pixCode = payment.pixCopiaECola || `00020101021226830014br.gov.bcb.pix2561api.asaas.com/v3/pix/qr/pay_${payment.id}_${Math.floor(Math.random()*900000+100000)}`;
+    setNotificationPixCode(pixCode);
+
+    const academyObj = academies.find(a => a.id === (student?.academyId || selectedAcademyId)) || academies[0];
+    const academyName = academyObj ? `${academyObj.name} (${academyObj.unit})` : "BJJ Academy";
+
+    // Format Default WhatsApp Message
+    const defaultMsg = `🥋 *${academyName.toUpperCase()} - AVISO DE COBRANÇA*
+
+Olá, *${details.recipientName}*! Tudo bem?
+
+Consta em nosso sistema que a mensalidade de Jiu-Jitsu do atleta *${payment.studentName}* referente ao vencimento *${details.dueDateFormatted}* encontra-se pendente com *${details.daysOverdue} dia(s) de atraso*.
+
+📊 *Demonstrativo de Valores Atualizados:*
+• Valor Original: R$ ${details.baseAmount.toFixed(2)}
+• Multa por Atraso (2.0%): R$ ${details.fineAmount.toFixed(2)}
+• Juros de Mora (${details.daysOverdue} dias a 0,033%/dia): R$ ${details.interestAmount.toFixed(2)}
+• *VALOR TOTAL ATUALIZADO: R$ ${details.updatedTotal.toFixed(2)}*
+
+⚡ *Pague via PIX Copia e Cola:*
+${pixCode}
+
+📱 *Chave PIX da BJJ Academy / Titular:*
+Chave (${pixConfig.pixKeyType}): ${pixConfig.pixKey}
+Titular: ${pixConfig.receiverName} (${pixConfig.bankName})
+
+_Caso o pagamento já tenha sido efetuado nas últimas horas, por favor desconsidere este aviso ou nos envie o comprovante. Agradecemos a compreensão e bons treinos! OSS!_ 🥋`;
+
+    setNotificationMessageText(defaultMsg);
+    setShowSendNotificationModal(true);
+  };
+
+  // Send Direct via WhatsApp Web / App
+  const handleSendViaWhatsApp = () => {
+    if (!notificationRecipientPhone) {
+      triggerToast("Telefone do destinatário não cadastrado.");
+      return;
+    }
+
+    const cleanPhone = notificationRecipientPhone.replace(/\D/g, "");
+    const formattedPhone = cleanPhone.startsWith("55") ? cleanPhone : `55${cleanPhone}`;
+    const encodedText = encodeURIComponent(notificationMessageText);
+    const whatsappUrl = `https://wa.me/${formattedPhone}?text=${encodedText}`;
+
+    // Register Notification in CRM and Payment History
+    if (selectedPaymentForNotification) {
+      const updatedPayment: PaymentHistory = {
+        ...selectedPaymentForNotification,
+        notificationCount: (selectedPaymentForNotification.notificationCount || 0) + 1,
+        lastNotifiedAt: new Date().toLocaleDateString("pt-BR")
+      };
+      onAddPayment(updatedPayment);
+    }
+
+    if (notificationStudent && onSendInvoiceAlert) {
+      onSendInvoiceAlert(notificationStudent);
+    }
+
+    pushAudit(
+      "DISPARO_WHATSAPP",
+      "PaymentNotification",
+      selectedPaymentForNotification?.id || "notif-01",
+      `Notificação de cobrança com juros disparada via WhatsApp para ${notificationRecipientName} (${notificationRecipientPhone}). Total: R$ ${notificationUpdatedTotal.toFixed(2)}.`
+    );
+
+    // Open WhatsApp
+    window.open(whatsappUrl, "_blank");
+    setShowSendNotificationModal(false);
+    triggerToast(`📲 WhatsApp aberto para envio da cobrança com juros a ${notificationRecipientName}!`);
+  };
+
+  // Send via Central de Mensagens / CRM
+  const handleSendViaCentralMessages = () => {
+    if (notificationStudent && onSendInvoiceAlert) {
+      onSendInvoiceAlert(notificationStudent);
+    }
+
+    if (selectedPaymentForNotification) {
+      const updatedPayment: PaymentHistory = {
+        ...selectedPaymentForNotification,
+        notificationCount: (selectedPaymentForNotification.notificationCount || 0) + 1,
+        lastNotifiedAt: new Date().toLocaleDateString("pt-BR")
+      };
+      onAddPayment(updatedPayment);
+    }
+
+    pushAudit(
+      "DISPARO_CRM",
+      "CrmCampaign",
+      selectedPaymentForNotification?.id || "crm-01",
+      `Cobrança de mensalidade com juros registrada e enviada pela Central de Mensagens para ${notificationRecipientName}.`
+    );
+
+    setShowSendNotificationModal(false);
+    triggerToast(`💬 Cobrança com juros enviada com sucesso pela Central de Mensagens para ${notificationRecipientName}!`);
+  };
+
+  // Register Asaas Student with Next Month Due Date and Immediate Invoice
   const handleRegisterAsaasStudent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newStudentForm.name || !newStudentForm.phone) {
@@ -691,8 +954,18 @@ export default function FinanceView({
       return;
     }
 
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth();
+    const dueDay = Number(newStudentForm.paymentDueDay) || 10;
+    
+    // Next month calculation
+    const nextDateObj = new Date(currentYear, currentMonth + 1, dueDay);
+    const nextPaymentDateStr = nextDateObj.toISOString().split("T")[0];
+
     const generatedCustomerId = `cus_00000${Math.floor(Math.random() * 900000 + 100000)}`;
     const generatedSubId = `sub_${Math.floor(Math.random() * 9000000 + 1000000)}`;
+    const studentId = `st-${Date.now()}`;
 
     const newStudentData: Omit<Student, "id"> = {
       academyId: newStudentForm.academyId,
@@ -708,8 +981,13 @@ export default function FinanceView({
       daysSinceLastClass: 0,
       status: "Active",
       paymentStatus: "Paid",
-      registrationDate: new Date().toISOString().split("T")[0],
-      birthDate: "1998-05-10",
+      paymentDueDay: dueDay,
+      nextPaymentDate: nextPaymentDateStr,
+      category: newStudentForm.category,
+      guardianName: newStudentForm.guardianName,
+      guardianPhone: newStudentForm.guardianPhone,
+      registrationDate: today.toISOString().split("T")[0],
+      birthDate: newStudentForm.category === "Kids / Infantil" ? "2015-06-15" : "1998-05-10",
       asaasCustomerId: generatedCustomerId,
       asaasSubscriptionId: generatedSubId,
       billingType: newStudentForm.billingType
@@ -719,24 +997,46 @@ export default function FinanceView({
       onAddStudent(newStudentData);
     }
 
+    // 1. Immediate payment for registration / first cycle
     onAddPayment({
-      studentId: `st-${Date.now()}`,
+      studentId: studentId,
       studentName: newStudentForm.name,
       amount: Number(newStudentForm.planValue),
-      date: new Date().toISOString().split("T")[0],
+      date: today.toISOString().split("T")[0],
       status: "Paid",
-      method: newStudentForm.billingType
+      method: newStudentForm.billingType,
+      recipientName: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianName ? newStudentForm.guardianName : newStudentForm.name,
+      recipientPhone: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianPhone ? newStudentForm.guardianPhone : newStudentForm.phone,
+      recipientType: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianName ? "GUARDIAN" : "STUDENT"
+    });
+
+    // 2. Next month recurring invoice scheduled automatically
+    const nextInvoiceTxId = Math.random().toString(36).substring(2, 12).toUpperCase();
+    const nextInvoicePix = `00020101021226830014br.gov.bcb.pix2561api.asaas.com/v3/pix/qr/pay_${nextInvoiceTxId}`;
+    
+    onAddPayment({
+      studentId: studentId,
+      studentName: newStudentForm.name,
+      amount: Number(newStudentForm.planValue),
+      date: today.toISOString().split("T")[0],
+      dueDate: nextPaymentDateStr,
+      status: "Pending",
+      method: newStudentForm.billingType,
+      pixCopiaECola: nextInvoicePix,
+      recipientName: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianName ? newStudentForm.guardianName : newStudentForm.name,
+      recipientPhone: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianPhone ? newStudentForm.guardianPhone : newStudentForm.phone,
+      recipientType: newStudentForm.category === "Kids / Infantil" && newStudentForm.guardianName ? "GUARDIAN" : "STUDENT"
     });
 
     pushAudit(
       "CREATE_CUSTOMER",
       "AsaasCustomer",
       generatedCustomerId,
-      `Aluno ${newStudentForm.name} cadastrado com sucesso no Asaas. Assinatura ${newStudentForm.plan} ativada.`
+      `Aluno ${newStudentForm.name} matriculado. Dia de vencimento: todo dia ${dueDay}. Próxima cobrança programada para ${nextPaymentDateStr} (R$ ${newStudentForm.planValue},00).`
     );
 
     setShowNewAsaasStudentModal(false);
-    triggerToast(`Aluno ${newStudentForm.name} matriculado com sucesso no Asaas! ID: ${generatedCustomerId}`);
+    triggerToast(`Aluno ${newStudentForm.name} matriculado com sucesso! Vencimento programado para todo dia ${dueDay} (Próximo: ${nextDateObj.toLocaleDateString("pt-BR")}).`);
   };
 
   // Add Accounts Payable Entry
@@ -881,6 +1181,23 @@ export default function FinanceView({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-end">
+          {/* Quick PIX Config Button */}
+          <button
+            onClick={() => {
+              setPixConfigForm(pixConfig);
+              setShowPixConfigModal(true);
+            }}
+            className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 border border-emerald-500/30 hover:border-emerald-500/60 px-3 py-1.5 rounded-xl text-xs text-emerald-400 font-semibold transition-all shadow cursor-pointer"
+            title="Clique para gerenciar e salvar sua chave PIX de recebimento"
+          >
+            <QrCode className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline text-slate-300">Chave PIX:</span>
+            <span className="font-mono text-[11px] text-emerald-300 font-bold truncate max-w-[130px]">{pixConfig.pixKey}</span>
+            <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold uppercase">
+              Salva
+            </span>
+          </button>
+
           {/* Tenant Selector */}
           <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl">
             <Building2 className="w-4 h-4 text-slate-400" />
@@ -1163,6 +1480,119 @@ export default function FinanceView({
             </div>
           </div>
 
+          {/* SEÇÃO ESPECIAL: MENSALIDADES EM ATRASO & CÁLCULO DE JUROS DE MORA */}
+          {(() => {
+            const overduePayments = filteredPayments.filter(p => {
+              const student = students.find(s => s.id === p.studentId);
+              const details = calculatePaymentDetails(p, student);
+              return details.isOverdue || p.status === "Overdue";
+            });
+
+            if (overduePayments.length === 0) return null;
+
+            return (
+              <div className="bg-gradient-to-r from-rose-950/60 via-slate-900 to-amber-950/60 border border-rose-500/40 p-5 rounded-2xl shadow-2xl space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-rose-500/20">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                      <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                        Gestão de Cobranças em Atraso & Recálculo de Juros
+                        <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
+                          {overduePayments.length} EM ATRASO
+                        </span>
+                      </h3>
+                      <p className="text-xs text-slate-300">
+                        Multa automática de <strong>2,0%</strong> + Juros de mora de <strong>0,033%/dia</strong> (~1%/mês). Envio de cobrança direta para o WhatsApp ou Central CRM.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right font-mono">
+                    <span className="text-[10px] text-slate-400 uppercase block">Total Corrigido em Atraso:</span>
+                    <span className="text-sm font-bold text-rose-400">
+                      {overduePayments.reduce((sum, p) => {
+                        const student = students.find(s => s.id === p.studentId);
+                        const details = calculatePaymentDetails(p, student);
+                        return sum + details.updatedTotal;
+                      }, 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Overdue Items Grid / Cards */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {overduePayments.map((p) => {
+                    const student = students.find(s => s.id === p.studentId);
+                    const details = calculatePaymentDetails(p, student);
+
+                    return (
+                      <div key={p.id} className="bg-slate-950/80 p-4 rounded-xl border border-rose-500/30 space-y-3 shadow-lg">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="text-xs font-bold text-white block">{p.studentName}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {details.recipientType === "GUARDIAN" ? `👨‍👩‍👧 Resp: ${details.recipientName} (${details.recipientPhone})` : `🥋 Contato: ${details.recipientPhone || "Não cadastrado"}`}
+                            </span>
+                          </div>
+
+                          <div className="flex flex-col items-end">
+                            <span className="bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] px-2 py-0.5 rounded font-mono font-bold">
+                              {details.daysOverdue} dias de atraso
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono mt-0.5">Venc: {details.dueDateFormatted}</span>
+                          </div>
+                        </div>
+
+                        {/* Discriminativo dos Valores */}
+                        <div className="grid grid-cols-4 gap-1.5 p-2 bg-slate-900 rounded-lg border border-slate-800 font-mono text-[10px]">
+                          <div>
+                            <span className="text-slate-500 block">Original</span>
+                            <span className="text-slate-200 font-bold">R$ {details.baseAmount.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-amber-400 block">Multa 2%</span>
+                            <span className="text-amber-300 font-bold">+ R$ {details.fineAmount.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-rose-400 block">Juros {details.daysOverdue}d</span>
+                            <span className="text-rose-300 font-bold">+ R$ {details.interestAmount.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-emerald-400 block">Total Refeito</span>
+                            <span className="text-emerald-300 font-bold text-[11px]">R$ {details.updatedTotal.toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        {/* Botões de Ação */}
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRecalculateOverdueWithInterest(p, student)}
+                            className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-[10px] px-2.5 py-1.5 rounded-lg font-mono font-semibold flex items-center gap-1 transition-all"
+                            title="Recalcular valor e regerar código PIX com juros"
+                          >
+                            <Zap className="w-3 h-3" /> Recalcular Juros
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleOpenNotificationModal(p, student)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 shadow transition-all"
+                          >
+                            <Send className="w-3 h-3" /> Enviar Cobrança / WhatsApp
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Fluxo de Caixa Recente (Transações Conciliadas) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
             <div className="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-950/40">
@@ -1178,57 +1608,104 @@ export default function FinanceView({
                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[10px] border-b border-slate-800">
                   <tr>
                     <th className="p-4">Aluno / Cliente</th>
-                    <th className="p-4">Data</th>
+                    <th className="p-4">Data / Vencimento</th>
                     <th className="p-4">Forma Cobrança</th>
-                    <th className="p-4">Valor Liquidado</th>
+                    <th className="p-4">Valor Original / Refeito</th>
                     <th className="p-4">Status</th>
-                    <th className="p-4 text-right">Comprovante</th>
+                    <th className="p-4 text-right">Ações & Notificação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
-                  {filteredPayments.map((p) => (
-                    <tr key={p.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="p-4">
-                        <span className="font-semibold text-slate-200 block">{p.studentName}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          ID: {p.studentId} | Asaas Pay: {p.asaasInvoiceId || "pay_8812"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-slate-400 font-mono">{p.date}</td>
-                      <td className="p-4">
-                        <span className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
-                          {p.method}
-                        </span>
-                      </td>
-                      <td className="p-4 font-mono font-bold text-slate-200">
-                        {p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-block text-[10px] px-2 py-0.5 rounded font-semibold ${
-                          p.status === "Paid" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                          p.status === "Pending" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
-                          "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                        }`}>
-                          {p.status === "Paid" ? "Compensado" : p.status === "Pending" ? "Aguardando PIX" : "Atrasado / Recusado"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={() => {
-                            setThankYouModalData({
-                              studentName: p.studentName,
-                              academyName: academies.find(a => a.id === selectedAcademyId)?.name || "Alliance SP",
-                              amount: p.amount,
-                              date: p.date
-                            });
-                          }}
-                          className="text-emerald-400 hover:text-emerald-300 text-[11px] font-semibold underline inline-flex items-center gap-1"
-                        >
-                          <CheckCircle className="w-3.5 h-3.5" /> Recibo
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {filteredPayments.map((p) => {
+                    const student = students.find(s => s.id === p.studentId);
+                    const details = calculatePaymentDetails(p, student);
+
+                    return (
+                      <tr key={p.id} className="hover:bg-slate-900/40 transition-colors">
+                        <td className="p-4">
+                          <span className="font-semibold text-slate-200 block">{p.studentName}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            {details.recipientType === "GUARDIAN" ? `👨‍👩‍👧 Resp: ${details.recipientName}` : `ID: ${p.studentId}`} | Asaas Pay: {p.asaasInvoiceId || "pay_8812"}
+                          </span>
+                        </td>
+                        <td className="p-4 text-slate-400 font-mono">
+                          <span className="block text-slate-300">{p.date}</span>
+                          {p.dueDate && (
+                            <span className="text-[10px] text-slate-500">Venc: {p.dueDate}</span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <span className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
+                            {p.method}
+                          </span>
+                        </td>
+                        <td className="p-4 font-mono font-bold text-slate-200">
+                          {details.isOverdue ? (
+                            <div>
+                              <span className="text-emerald-400 block text-xs">
+                                {details.updatedTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </span>
+                              <span className="text-[10px] text-slate-500 line-through">
+                                {p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                              </span>
+                            </div>
+                          ) : (
+                            p.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <span className={`inline-block text-[10px] px-2 py-0.5 rounded font-semibold ${
+                            p.status === "Paid" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                            details.isOverdue || p.status === "Overdue" ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" :
+                            "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          }`}>
+                            {p.status === "Paid" ? "Compensado" : details.isOverdue ? `Atrasado (${details.daysOverdue}d)` : "Aguardando PIX"}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {p.status === "Paid" ? (
+                              <button
+                                onClick={() => {
+                                  setThankYouModalData({
+                                    studentName: p.studentName,
+                                    academyName: academies.find(a => a.id === selectedAcademyId)?.name || "Alliance SP",
+                                    amount: p.amount,
+                                    date: p.date
+                                  });
+                                }}
+                                className="text-emerald-400 hover:text-emerald-300 text-[11px] font-semibold underline inline-flex items-center gap-1"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" /> Recibo
+                              </button>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenNotificationModal(p, student)}
+                                  className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[10px] px-2 py-1 rounded font-semibold flex items-center gap-1"
+                                  title="Notificar cobrança com juros via WhatsApp ou Central de Mensagens"
+                                >
+                                  <MessageSquare className="w-3 h-3" /> Notificar
+                                </button>
+                                
+                                {details.isOverdue && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRecalculateOverdueWithInterest(p, student)}
+                                    className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-[10px] px-2 py-1 rounded font-semibold flex items-center gap-1"
+                                    title="Recalcular juros de mora"
+                                  >
+                                    <Zap className="w-3 h-3" /> Juros
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1267,79 +1744,121 @@ export default function FinanceView({
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950 text-slate-400 font-mono uppercase text-[10px] border-b border-slate-800">
                   <tr>
-                    <th className="p-4">Aluno / CPF</th>
+                    <th className="p-4">Aluno / CPF / Responsável</th>
                     <th className="p-4">Plano / Ciclo</th>
+                    <th className="p-4">Dia do Vencimento & Próximo Ciclo</th>
                     <th className="p-4">Valor Recorrente</th>
                     <th className="p-4">Forma Pagamento</th>
                     <th className="p-4">Status Financeiro</th>
-                    <th className="p-4 text-right">Ações da Assinatura</th>
+                    <th className="p-4 text-right">Ações & Notificação</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/60">
-                  {filteredStudents.map((st) => (
-                    <tr key={st.id} className="hover:bg-slate-900/40 transition-colors">
-                      <td className="p-4">
-                        <span className="font-semibold text-white block">{st.name}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          CPF: {st.cpf || "123.456.789-00"} | Asaas ID: {st.asaasCustomerId || "cus_001"}
-                        </span>
-                      </td>
-                      <td className="p-4 font-mono text-slate-300">
-                        <span className="font-bold text-slate-100 block">{st.plan || "Mensal"}</span>
-                        <span className="text-[10px] text-slate-500">Sub: {st.asaasSubscriptionId || "sub_10091823"}</span>
-                      </td>
-                      <td className="p-4 font-mono font-bold text-slate-200">
-                        R$ {st.planValue || 220},00 / mês
-                      </td>
-                      <td className="p-4">
-                        <span className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
-                          {st.billingType || "PIX"}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <span className={`inline-block text-[10px] px-2.5 py-1 rounded font-bold ${
-                          st.paymentStatus === "Paid" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
-                          st.paymentStatus === "Pending" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
-                          "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                        }`}>
-                          {st.paymentStatus === "Paid" ? "ATIVA (EM DIA)" : st.paymentStatus === "Pending" ? "PAUSADA" : "INADIMPLENTE"}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex justify-end items-center gap-1.5">
-                          {st.paymentStatus === "Paid" ? (
-                            <button
-                              onClick={() => handleSubscriptionAction(st, "PAUSE")}
-                              className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                            >
-                              <PauseCircle className="w-3 h-3" /> Pausar
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleSubscriptionAction(st, "RESUME")}
-                              className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                            >
-                              <PlayCircle className="w-3 h-3" /> Reativar
-                            </button>
+                  {filteredStudents.map((st) => {
+                    const today = new Date();
+                    const dueDay = st.paymentDueDay || 10;
+                    const nextDueDate = new Date(today.getFullYear(), today.getMonth() + (st.paymentStatus === "Paid" ? 1 : 0), dueDay);
+                    const matchingOverduePayment = filteredPayments.find(p => p.studentId === st.id && (p.status === "Overdue" || p.status === "Pending"));
+
+                    return (
+                      <tr key={st.id} className="hover:bg-slate-900/40 transition-colors">
+                        <td className="p-4">
+                          <span className="font-semibold text-white block">{st.name}</span>
+                          <span className="text-[10px] text-slate-500 font-mono block">
+                            CPF: {st.cpf || "123.456.789-00"} | Asaas ID: {st.asaasCustomerId || "cus_001"}
+                          </span>
+                          {st.category === "Kids / Infantil" && st.guardianName && (
+                            <span className="text-[10px] text-indigo-400 font-mono block">
+                              👨‍👩‍👧 Pais: {st.guardianName} ({st.guardianPhone || "Sem tel"})
+                            </span>
                           )}
+                        </td>
+                        <td className="p-4 font-mono text-slate-300">
+                          <span className="font-bold text-slate-100 block">{st.plan || "Mensal"}</span>
+                          <span className="text-[10px] text-slate-500">Sub: {st.asaasSubscriptionId || "sub_10091823"}</span>
+                        </td>
+                        <td className="p-4 font-mono text-xs">
+                          <span className="text-emerald-400 font-bold block">Todo dia {dueDay.toString().padStart(2, "0")}</span>
+                          <span className="text-[10px] text-slate-400">
+                            Próx: {nextDueDate.toLocaleDateString("pt-BR")}
+                          </span>
+                        </td>
+                        <td className="p-4 font-mono font-bold text-slate-200">
+                          R$ {st.planValue || 220},00 / mês
+                        </td>
+                        <td className="p-4">
+                          <span className="bg-slate-950 border border-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded font-mono">
+                            {st.billingType || "PIX"}
+                          </span>
+                        </td>
+                        <td className="p-4">
+                          <span className={`inline-block text-[10px] px-2.5 py-1 rounded font-bold ${
+                            st.paymentStatus === "Paid" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                            st.paymentStatus === "Pending" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20" :
+                            "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                          }`}>
+                            {st.paymentStatus === "Paid" ? "ATIVA (EM DIA)" : st.paymentStatus === "Pending" ? "PAUSADA" : "INADIMPLENTE"}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <div className="flex justify-end items-center gap-1.5 flex-wrap">
+                            {st.paymentStatus !== "Paid" && (
+                              <button
+                                onClick={() => {
+                                  const pay = matchingOverduePayment || {
+                                    id: `pay_temp_${st.id}`,
+                                    studentId: st.id,
+                                    studentName: st.name,
+                                    amount: st.planValue || 220,
+                                    date: new Date().toISOString().split("T")[0],
+                                    dueDate: new Date(Date.now() - 5 * 86400000).toISOString().split("T")[0],
+                                    method: st.billingType || "PIX",
+                                    status: "Overdue" as const,
+                                    academyId: st.academyId || selectedAcademyId
+                                  };
+                                  handleOpenNotificationModal(pay, st);
+                                }}
+                                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                                title="Enviar lembrete de cobrança com juros via WhatsApp ou Central de Mensagens"
+                              >
+                                <Send className="w-3 h-3" /> Notificar
+                              </button>
+                            )}
 
-                          <button
-                            onClick={() => handleSubscriptionAction(st, "CANCEL")}
-                            className="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                          >
-                            <Ban className="w-3 h-3" /> Cancelar
-                          </button>
+                            {st.paymentStatus === "Paid" ? (
+                              <button
+                                onClick={() => handleSubscriptionAction(st, "PAUSE")}
+                                className="bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                              >
+                                <PauseCircle className="w-3 h-3" /> Pausar
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleSubscriptionAction(st, "RESUME")}
+                                className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                              >
+                                <PlayCircle className="w-3 h-3" /> Reativar
+                              </button>
+                            )}
 
-                          <button
-                            onClick={() => handleOpenPayNow(st)}
-                            className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
-                          >
-                            <QrCode className="w-3 h-3" /> Cobrar PIX
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            <button
+                              onClick={() => handleSubscriptionAction(st, "CANCEL")}
+                              className="bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                            >
+                              <Ban className="w-3 h-3" /> Cancelar
+                            </button>
+
+                            <button
+                              onClick={() => handleOpenPayNow(st)}
+                              className="bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2.5 py-1 rounded font-semibold flex items-center gap-1"
+                            >
+                              <QrCode className="w-3 h-3" /> Cobrar PIX
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -2620,6 +3139,60 @@ model Student {
             </div>
           </div>
 
+          {/* Card Destaque: Chave PIX Salva na Área de Cobrança da Plataforma */}
+          <div className="bg-gradient-to-r from-emerald-950/70 via-slate-900 to-indigo-950/70 border border-emerald-500/40 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                <QrCode className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
+                    Chave PIX Salva • Cobrança da Plataforma BJJ Academy
+                  </h3>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono font-bold flex items-center gap-1">
+                    <Check className="w-3 h-3 text-emerald-400" /> ATIVA & CONFIGURADA
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  Esta chave é salva no sistema e vinculada a todas as faturas de mensalidade, licenças e mensagens de cobrança emitidas.
+                </p>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-1">
+                  <span className="text-slate-400 font-mono">
+                    Chave ({pixConfig.pixKeyType}): <strong className="text-emerald-400 font-bold select-all bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">{pixConfig.pixKey}</strong>
+                  </span>
+                  <span className="text-slate-400">
+                    Titular: <strong className="text-white">{pixConfig.receiverName}</strong>
+                  </span>
+                  <span className="text-slate-400">
+                    Banco: <strong className="text-slate-200">{pixConfig.bankName}</strong>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto shrink-0 justify-end">
+              <button
+                onClick={async () => {
+                  await copyToClipboard(pixConfig.pixKey);
+                  triggerToast(`Chave PIX (${pixConfig.pixKey}) copiada com sucesso!`);
+                }}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs px-3.5 py-2 rounded-xl border border-slate-700 flex items-center gap-1.5 transition-all shadow"
+              >
+                <Copy className="w-3.5 h-3.5 text-emerald-400" /> Copiar Minha Chave PIX
+              </button>
+              <button
+                onClick={() => {
+                  setPixConfigForm(pixConfig);
+                  setShowPixConfigModal(true);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-lg flex items-center gap-1.5 transition-all"
+              >
+                <Settings className="w-3.5 h-3.5" /> Editar / Alterar Chave PIX
+              </button>
+            </div>
+          </div>
+
           {/* SaaS KPIs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl space-y-2 shadow-lg">
@@ -2732,16 +3305,26 @@ model Student {
                       </td>
                       <td className="py-3.5 px-3 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={async () => {
+                              await copyToClipboard(pixConfig.pixKey);
+                              triggerToast(`Chave PIX da BJJ Academy (${pixConfig.pixKey}) copiada!`);
+                            }}
+                            className="bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-lg text-[10px] font-mono flex items-center gap-1"
+                            title={`Copiar Chave PIX Salva: ${pixConfig.pixKey}`}
+                          >
+                            <QrCode className="w-3 h-3 text-emerald-400" /> Chave PIX
+                          </button>
                           {inv.pixCopiaECola && (
                             <button
                               onClick={async () => {
                                 await copyToClipboard(inv.pixCopiaECola || "");
-                                triggerToast(`PIX da licença BJJ Academy para ${inv.academyName} copiado!`);
+                                triggerToast(`Código Copia e Cola da licença BJJ Academy para ${inv.academyName} copiado!`);
                               }}
                               className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg text-[10px] font-mono flex items-center gap-1"
-                              title="Copiar PIX"
+                              title="Copiar PIX Copia e Cola"
                             >
-                              <Copy className="w-3 h-3 text-blue-400" /> Copiar PIX
+                              <Copy className="w-3 h-3 text-blue-400" /> Copia e Cola
                             </button>
                           )}
                           {inv.status !== "PAID" && (
@@ -2769,7 +3352,7 @@ model Student {
       {/* MODAL: NOVO ALUNO COM ASAAS INTEGRADO */}
       {showNewAsaasStudentModal && (
         <div className="fixed inset-0 z-[10000] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-emerald-500/40 p-6 md:p-8 rounded-2xl max-w-lg w-full space-y-5 shadow-2xl relative">
+          <div className="bg-slate-900 border border-emerald-500/40 p-6 md:p-8 rounded-2xl max-w-lg w-full space-y-5 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowNewAsaasStudentModal(false)}
               className="absolute top-4 right-4 text-slate-500 hover:text-white"
@@ -2783,7 +3366,7 @@ model Student {
               </div>
               <div>
                 <h3 className="text-base font-bold text-white font-display">Matricular Aluno com Asaas API</h3>
-                <p className="text-xs text-slate-400">Cria o cliente, gera a assinatura no Asaas e emite a cobrança inicial</p>
+                <p className="text-xs text-slate-400">Cria o cliente, agenda vencimento no mês seguinte e gera cobrança automática</p>
               </div>
             </div>
 
@@ -2801,6 +3384,38 @@ model Student {
                 </select>
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Categoria de Treino</label>
+                  <select
+                    value={newStudentForm.category}
+                    onChange={(e) => setNewStudentForm({ ...newStudentForm, category: e.target.value as any })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                  >
+                    <option value="Adulto">Adulto (+18)</option>
+                    <option value="Kids / Infantil">Kids / Infantil (Menor de Idade)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Graduação / Faixa</label>
+                  <select
+                    value={newStudentForm.belt}
+                    onChange={(e) => setNewStudentForm({ ...newStudentForm, belt: e.target.value as any })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                  >
+                    <option value="White">Branca</option>
+                    <option value="Grey">Cinza (Kids)</option>
+                    <option value="Yellow">Amarela (Kids)</option>
+                    <option value="Orange">Laranja (Kids)</option>
+                    <option value="Green">Verde (Kids)</option>
+                    <option value="Blue">Azul</option>
+                    <option value="Purple">Roxa</option>
+                    <option value="Brown">Marrom</option>
+                    <option value="Black">Preta</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">Nome Completo do Aluno</label>
                 <input
@@ -2813,9 +3428,42 @@ model Student {
                 />
               </div>
 
+              {/* Se for Kids: Campos de Responsável Legal */}
+              {newStudentForm.category === "Kids / Infantil" && (
+                <div className="p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl space-y-3">
+                  <span className="text-[11px] font-bold text-indigo-300 block font-mono">
+                    👨‍👩‍👧 DADOS DOS PAIS / RESPONSÁVEL LEGAL (NOTIFICAÇÕES DE COBRANÇA)
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">Nome do Pai / Mãe / Responsável</label>
+                      <input
+                        type="text"
+                        required={newStudentForm.category === "Kids / Infantil"}
+                        placeholder="Ex: Renata Alencar (Mãe)"
+                        value={newStudentForm.guardianName}
+                        onChange={(e) => setNewStudentForm({ ...newStudentForm, guardianName: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-slate-400 mb-1">WhatsApp do Responsável</label>
+                      <input
+                        type="text"
+                        required={newStudentForm.category === "Kids / Infantil"}
+                        placeholder="(11) 97711-2233"
+                        value={newStudentForm.guardianPhone}
+                        onChange={(e) => setNewStudentForm({ ...newStudentForm, guardianPhone: e.target.value })}
+                        className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-xs text-white font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">CPF do Aluno</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">CPF do Aluno / Responsável</label>
                   <input
                     type="text"
                     placeholder="123.456.789-00"
@@ -2825,7 +3473,7 @@ model Student {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">WhatsApp / Telefone</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">WhatsApp / Telefone Contato</label>
                   <input
                     type="text"
                     required
@@ -2842,7 +3490,11 @@ model Student {
                   <label className="block text-xs font-semibold text-slate-300 mb-1">Plano de Assinatura</label>
                   <select
                     value={newStudentForm.plan}
-                    onChange={(e) => setNewStudentForm({ ...newStudentForm, plan: e.target.value as SubscriptionPlan })}
+                    onChange={(e) => {
+                      const p = e.target.value as SubscriptionPlan;
+                      const val = p === "Mensal" ? 220 : p === "Trimestral" ? 210 : p === "Semestral" ? 200 : 180;
+                      setNewStudentForm({ ...newStudentForm, plan: p, planValue: val });
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none"
                   >
                     <option value="Mensal">Mensal (R$ 220)</option>
@@ -2852,18 +3504,51 @@ model Student {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Forma de Cobrança</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Dia do Vencimento Mensal</label>
                   <select
-                    value={newStudentForm.billingType}
-                    onChange={(e) => setNewStudentForm({ ...newStudentForm, billingType: e.target.value as PaymentBillingType })}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                    value={newStudentForm.paymentDueDay}
+                    onChange={(e) => setNewStudentForm({ ...newStudentForm, paymentDueDay: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-emerald-400 font-bold font-mono focus:outline-none"
                   >
-                    <option value="PIX">PIX (QR Code Dinâmico)</option>
-                    <option value="BOLETO">Boleto Bancário Asaas</option>
-                    <option value="CREDIT_CARD">Cartão de Crédito Recorrente</option>
+                    <option value={5}>Todo dia 05</option>
+                    <option value={10}>Todo dia 10</option>
+                    <option value={15}>Todo dia 15</option>
+                    <option value={20}>Todo dia 20</option>
+                    <option value={25}>Todo dia 25</option>
+                    <option value={28}>Todo dia 28</option>
                   </select>
                 </div>
               </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Forma de Cobrança</label>
+                <select
+                  value={newStudentForm.billingType}
+                  onChange={(e) => setNewStudentForm({ ...newStudentForm, billingType: e.target.value as PaymentBillingType })}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-white focus:outline-none"
+                >
+                  <option value="PIX">PIX (QR Code Dinâmico)</option>
+                  <option value="BOLETO">Boleto Bancário Asaas</option>
+                  <option value="CREDIT_CARD">Cartão de Crédito Recorrente</option>
+                </select>
+              </div>
+
+              {/* Banner Informativo de Geração Automática */}
+              {(() => {
+                const today = new Date();
+                const nextM = new Date(today.getFullYear(), today.getMonth() + 1, Number(newStudentForm.paymentDueDay) || 10);
+                return (
+                  <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl space-y-1 text-xs">
+                    <span className="font-bold text-emerald-300 flex items-center gap-1">
+                      <CheckCircle className="w-3.5 h-3.5" /> Automação de Matrícula e Próxima Mensalidade:
+                    </span>
+                    <p className="text-slate-300 text-[11px]">
+                      • <strong>1º Ciclo (Hoje):</strong> R$ {newStudentForm.planValue},00 gerado e liquidado no ato da matrícula.<br/>
+                      • <strong>Próximo Vencimento:</strong> {nextM.toLocaleDateString("pt-BR")} (R$ {newStudentForm.planValue},00 gerado automaticamente).
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2 flex justify-end gap-2">
                 <button
@@ -2875,12 +3560,149 @@ model Student {
                 </button>
                 <button
                   type="submit"
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-1.5"
                 >
-                  Criar Assinatura no Asaas
+                  <Check className="w-4 h-4" /> Salvar Matrícula & Gerar Mensalidade
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DISPARO DE COBRANÇA COM JUROS (WHATSAPP & CENTRAL DE MENSAGENS) */}
+      {showSendNotificationModal && selectedPaymentForNotification && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-rose-500/40 p-6 md:p-7 rounded-2xl max-w-lg w-full space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+            <button
+              onClick={() => setShowSendNotificationModal(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
+                  Enviar Cobrança com Juros de Mora
+                  <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                    {notificationOverdueDays} DIAS ATRASO
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Notifique o contato salvo ({notificationRecipientType === "GUARDIAN" ? "Pais / Responsável" : "Atleta"}) via WhatsApp ou Central de Mensagens.
+                </p>
+              </div>
+            </div>
+
+            {/* Cartão de Detalhes do Destinatário & Discriminação Financeira */}
+            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-850">
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-mono block">
+                    {notificationRecipientType === "GUARDIAN" ? "👨‍👩‍👧 Contato dos Pais / Responsável" : "🥋 Contato do Aluno"}
+                  </span>
+                  <strong className="text-sm text-white block">{notificationRecipientName}</strong>
+                </div>
+                <div className="font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20 w-fit">
+                  📞 {notificationRecipientPhone || "Sem telefone cadastrado"}
+                </div>
+              </div>
+
+              {/* Tabela de Cálculo de Multa e Juros */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-[11px]">
+                <div className="p-2 bg-slate-900 rounded-lg border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Valor Original</span>
+                  <span className="text-white font-bold">
+                    R$ {(selectedPaymentForNotification.amount || 220).toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-2 bg-slate-900 rounded-lg border border-slate-800">
+                  <span className="text-amber-400 block text-[10px]">Multa (2.0%)</span>
+                  <span className="text-amber-300 font-bold">
+                    + R$ {notificationFineAmount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-2 bg-slate-900 rounded-lg border border-slate-800">
+                  <span className="text-rose-400 block text-[10px]">Juros ({notificationOverdueDays}d)</span>
+                  <span className="text-rose-300 font-bold">
+                    + R$ {notificationInterestAmount.toFixed(2)}
+                  </span>
+                </div>
+                <div className="p-2 bg-emerald-950/80 rounded-lg border border-emerald-500/30">
+                  <span className="text-emerald-400 block text-[10px]">Total Refeito</span>
+                  <span className="text-emerald-300 font-bold text-xs">
+                    R$ {notificationUpdatedTotal.toFixed(2)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Editor de Texto da Mensagem (WhatsApp / CRM) */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-blue-400" /> Prévia da Mensagem (Editável)
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await copyToClipboard(notificationMessageText);
+                    triggerToast("Texto da mensagem copiado para a área de transferência!");
+                  }}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 underline font-mono"
+                >
+                  Copiar Texto
+                </button>
+              </div>
+              <textarea
+                rows={7}
+                value={notificationMessageText}
+                onChange={(e) => setNotificationMessageText(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 font-mono focus:outline-none focus:border-rose-500/50 leading-relaxed"
+              />
+            </div>
+
+            {/* Linha Digitável PIX Copia e Cola */}
+            {notificationPixCode && (
+              <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-2 text-xs font-mono">
+                <div className="overflow-hidden">
+                  <span className="text-[10px] text-slate-400 block">PIX Copia e Cola com Valor Atualizado:</span>
+                  <span className="text-emerald-400 truncate block text-[11px]">{notificationPixCode}</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    await copyToClipboard(notificationPixCode);
+                    triggerToast("Código PIX com juros copiado com sucesso!");
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-white px-2.5 py-1.5 rounded text-[10px] flex items-center gap-1 flex-shrink-0"
+                >
+                  <Copy className="w-3 h-3 text-emerald-400" /> Copiar
+                </button>
+              </div>
+            )}
+
+            {/* Botões de Ação */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={handleSendViaWhatsApp}
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 transition-all"
+              >
+                <Send className="w-4 h-4" /> Disparar via WhatsApp
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSendViaCentralMessages}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2 transition-all"
+              >
+                <MessageSquare className="w-4 h-4" /> Enviar pela Central CRM
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -3058,6 +3880,27 @@ model Student {
               <span className="text-[10px] text-emerald-400 font-mono block">Valor: R$ {pixAmount},00</span>
             </div>
 
+            <div className="p-2.5 bg-slate-950/80 border border-emerald-500/30 rounded-xl space-y-1.5 font-mono text-[11px]">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 text-[10px]">Chave PIX da Plataforma:</span>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded font-bold uppercase">SALVA</span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <strong className="text-emerald-400 font-bold select-all truncate">{pixConfig.pixKey}</strong>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await copyToClipboard(pixConfig.pixKey);
+                    triggerToast(`Chave PIX (${pixConfig.pixKey}) copiada!`);
+                  }}
+                  className="text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded text-[10px] font-semibold flex items-center gap-1 shrink-0"
+                >
+                  <Copy className="w-2.5 h-2.5 text-emerald-400" /> Copiar
+                </button>
+              </div>
+              <p className="text-slate-500 text-[10px]">Titular: {pixConfig.receiverName} ({pixConfig.bankName})</p>
+            </div>
+
             <div className="bg-white p-4 rounded-xl flex flex-col items-center justify-center">
               <div className="w-32 h-32 border-2 border-slate-950 bg-slate-900 text-white flex items-center justify-center text-[10px] font-mono text-center font-bold">
                 🥋 QR CODE PIX ASAAS<br/>R$ {pixAmount},00
@@ -3102,6 +3945,10 @@ model Student {
               <div className="flex justify-between">
                 <span className="text-slate-500">Data Quitação:</span>
                 <span className="text-slate-300">{thankYouModalData.date}</span>
+              </div>
+              <div className="flex justify-between pt-1 border-t border-slate-800/80">
+                <span className="text-slate-500">Chave PIX Usada:</span>
+                <span className="text-emerald-400 font-bold">{pixConfig.pixKey}</span>
               </div>
             </div>
 
@@ -3152,6 +3999,27 @@ model Student {
             <h3 className="text-sm font-bold text-white font-display flex items-center gap-2">
               <Building2 className="w-4 h-4 text-blue-400" /> Emitir Cobrança de Licença BJJ Academy
             </h3>
+
+            {/* Chave PIX de Recebimento Salva */}
+            <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-1.5 text-emerald-400 font-semibold font-mono text-[11px]">
+                  <QrCode className="w-3.5 h-3.5" /> Chave PIX Ativa de Recebimento:
+                </div>
+                <div className="text-white font-mono font-bold text-xs">{pixConfig.pixKey}</div>
+                <div className="text-slate-400 text-[10px]">{pixConfig.receiverName} ({pixConfig.bankName})</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPixConfigForm(pixConfig);
+                  setShowPixConfigModal(true);
+                }}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1 rounded-lg text-[10px] font-semibold"
+              >
+                Alterar
+              </button>
+            </div>
 
             <form
               onSubmit={(e) => {
@@ -3244,6 +4112,179 @@ model Student {
               >
                 Gerar Cobrança de Licença
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIGURAR E SALVAR CHAVE PIX DA PLATAFORMA */}
+      {showPixConfigModal && (
+        <div className="fixed inset-0 z-[10000] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-emerald-500/40 p-6 rounded-2xl max-w-lg w-full space-y-5 shadow-2xl relative text-xs animate-in zoom-in-95 duration-200">
+            <button
+              onClick={() => setShowPixConfigModal(false)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Modal Header */}
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 shrink-0">
+                <QrCode className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
+                  Configurar Chave PIX da BJJ Academy
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded-full font-mono font-bold">
+                    ÁREA DE COBRANÇA
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Salve sua chave PIX para recebimento direto de mensalidades, faturas de licença e cobranças automáticas via WhatsApp.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSavePixConfig} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Tipo de Chave */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Tipo de Chave PIX</label>
+                  <select
+                    value={pixConfigForm.pixKeyType}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, pixKeyType: e.target.value as any })}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white font-medium focus:border-emerald-500 focus:outline-none"
+                  >
+                    <option value="EMAIL">E-mail</option>
+                    <option value="CPF_CNPJ">CPF ou CNPJ</option>
+                    <option value="PHONE">Telefone Celular</option>
+                    <option value="RANDOM_EVP">Chave Aleatória (EVP)</option>
+                  </select>
+                </div>
+
+                {/* Valor da Chave */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Sua Chave PIX</label>
+                  <input
+                    type="text"
+                    required
+                    value={pixConfigForm.pixKey}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, pixKey: e.target.value })}
+                    placeholder="ex: messiasbjunior76@gmail.com"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Nome do Titular */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Nome do Titular / Razão Social</label>
+                  <input
+                    type="text"
+                    required
+                    value={pixConfigForm.receiverName}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, receiverName: e.target.value })}
+                    placeholder="ex: Messias B. Junior"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Instituição / Banco */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Banco / Instituição Financeira</label>
+                  <input
+                    type="text"
+                    required
+                    value={pixConfigForm.bankName}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, bankName: e.target.value })}
+                    placeholder="ex: Asaas / Nu Pagamentos / Banco Inter"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Cidade */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Cidade do Titular</label>
+                  <input
+                    type="text"
+                    value={pixConfigForm.receiverCity}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, receiverCity: e.target.value })}
+                    placeholder="ex: São Paulo"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Descrição Padrão */}
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Descrição / Identificador</label>
+                  <input
+                    type="text"
+                    value={pixConfigForm.description}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, description: e.target.value })}
+                    placeholder="ex: Fatura de Mensalidade BJJ Academy"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Opções de Automação */}
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-2">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pixConfigForm.autoIncludeInInvoices}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, autoIncludeInInvoices: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                  />
+                  <span className="text-slate-300 font-medium">Incluir automaticamente esta Chave PIX em todas as Faturas de Licença SaaS</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pixConfigForm.autoIncludeInWhatsApp}
+                    onChange={(e) => setPixConfigForm({ ...pixConfigForm, autoIncludeInWhatsApp: e.target.checked })}
+                    className="w-4 h-4 rounded border-slate-700 text-emerald-500 focus:ring-emerald-500 bg-slate-900"
+                  />
+                  <span className="text-slate-300 font-medium">Incluir dados desta Chave PIX nos avisos de cobrança disparados via WhatsApp</span>
+                </label>
+              </div>
+
+              {/* Live Preview Box */}
+              <div className="p-3 bg-emerald-950/30 border border-emerald-500/20 rounded-xl space-y-1">
+                <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase block">Preview da Chave Salva:</span>
+                <div className="font-mono text-xs text-white">
+                  Chave ({pixConfigForm.pixKeyType}): <strong className="text-emerald-300">{pixConfigForm.pixKey || "---"}</strong>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Beneficiário: <strong className="text-slate-300">{pixConfigForm.receiverName || "---"}</strong> • Banco: <strong className="text-slate-300">{pixConfigForm.bankName || "---"}</strong>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await copyToClipboard(pixConfigForm.pixKey);
+                    triggerToast(`Chave (${pixConfigForm.pixKey}) copiada para teste!`);
+                  }}
+                  className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold py-2.5 px-4 rounded-xl border border-slate-700 flex items-center justify-center gap-2"
+                >
+                  <Copy className="w-4 h-4 text-emerald-400" /> Copiar para Teste
+                </button>
+
+                <button
+                  type="submit"
+                  className="w-full sm:flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <Check className="w-4 h-4" /> Salvar Minha Chave PIX na Plataforma
+                </button>
+              </div>
             </form>
           </div>
         </div>

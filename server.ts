@@ -655,6 +655,123 @@ Instruções para o modelo de visão:
   }
 });
 
+// Endpoint for AI Assisted Field Mapping (Gemini 3.7 Flash)
+app.post("/api/migration/suggest-mapping", async (req, res) => {
+  const { headers, sampleRows = [] } = req.body;
+
+  if (!headers || !Array.isArray(headers) || headers.length === 0) {
+    return res.status(400).json({ error: "Lista de cabeçalhos da planilha é obrigatória." });
+  }
+
+  const targetSchema = [
+    { key: "name", description: "Nome completo do aluno / atleta" },
+    { key: "cpf", description: "CPF ou documento fiscal do aluno" },
+    { key: "email", description: "E-mail de contato do aluno" },
+    { key: "phone", description: "WhatsApp ou celular para notificações" },
+    { key: "belt", description: "Faixa de Jiu-Jitsu (Branca, Azul, Roxa, Marrom, Preta, etc)" },
+    { key: "stripes", description: "Quantidade de graus na faixa atual (0 a 4)" },
+    { key: "category", description: "Categoria da turma (Adulto ou Kids/Infantil)" },
+    { key: "birthDate", description: "Data de nascimento do aluno" },
+    { key: "plan", description: "Nome ou modalidade do plano (Mensal, Trimestral, Semestral, Anual)" },
+    { key: "planValue", description: "Valor monetário da mensalidade em R$" },
+    { key: "paymentDueDay", description: "Dia fixo do mês de vencimento (1 a 31)" },
+    { key: "paymentStatus", description: "Status de adimplência financeira (Pago, Atrasado, Pendente)" },
+    { key: "guardianName", description: "Nome do pai, mãe ou responsável legal para menores de idade (Kids)" },
+    { key: "guardianPhone", description: "Telefone / WhatsApp do responsável legal" },
+    { key: "guardianEmail", description: "E-mail do responsável legal" },
+    { key: "attendance30Days", description: "Número de presenças nos últimos 30 dias / frequência de treinos" },
+    { key: "notes", description: "Observações gerais, médicas, restrições ou histórico do atleta" }
+  ];
+
+  const generateSimulatedMapping = () => {
+    const mappings: Record<string, { sourceHeader: string | null; confidence: number; reasoning: string }> = {};
+    for (const item of targetSchema) {
+      const found = headers.find((h: string) => {
+        const cleanH = h.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const cleanKey = item.key.toLowerCase();
+        return cleanH.includes(cleanKey) || cleanKey.includes(cleanH);
+      });
+      mappings[item.key] = {
+        sourceHeader: found || null,
+        confidence: found ? 0.90 : 0.40,
+        reasoning: found ? `Identificado pelo nome correspondente '${found}'.` : "Sem correspondência direta encontrada."
+      };
+    }
+    return {
+      mappings,
+      isSimulated: true,
+      analysis: "Mapeamento heurístico aplicado com sucesso com base nas colunas da planilha."
+    };
+  };
+
+  if (!ai) {
+    return res.json(generateSimulatedMapping());
+  }
+
+  try {
+    const promptText = `Você é um engenheiro sênior especialista em migração de dados para a plataforma BJJ Academy SaaS.
+Analise os cabeçalhos de uma planilha de academia de Jiu-Jitsu e as primeiras linhas de amostra:
+
+CABEÇALHOS DO ARQUIVO:
+${JSON.stringify(headers)}
+
+LINHAS DE AMOSTRA DOS DADOS:
+${JSON.stringify(sampleRows.slice(0, 3))}
+
+CAMPOS DE DESTINO DO SCHEMA BJJ ACADEMY:
+${JSON.stringify(targetSchema)}
+
+Instruções:
+1. Para cada campo de destino, identifique qual cabeçalho do arquivo original melhor corresponde.
+2. Atribua um índice de confiança de 0.0 a 1.0.
+3. Se não houver correspondência razoável para algum campo de destino, deixe sourceHeader como null.
+4. Responda ESTRITAMENTE em JSON com a estrutura:
+{
+  "mappings": {
+    "name": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.95, "reasoning": "Breve justificativa" },
+    "cpf": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.90, "reasoning": "Breve justificativa" },
+    "email": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.92, "reasoning": "Breve justificativa" },
+    "phone": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.98, "reasoning": "Breve justificativa" },
+    "belt": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.95, "reasoning": "Breve justificativa" },
+    "stripes": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.90, "reasoning": "Breve justificativa" },
+    "category": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.85, "reasoning": "Breve justificativa" },
+    "birthDate": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.90, "reasoning": "Breve justificativa" },
+    "plan": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.88, "reasoning": "Breve justificativa" },
+    "planValue": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.92, "reasoning": "Breve justificativa" },
+    "paymentDueDay": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.85, "reasoning": "Breve justificativa" },
+    "paymentStatus": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.90, "reasoning": "Breve justificativa" },
+    "guardianName": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.85, "reasoning": "Breve justificativa" },
+    "guardianPhone": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.85, "reasoning": "Breve justificativa" },
+    "guardianEmail": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.80, "reasoning": "Breve justificativa" },
+    "attendance30Days": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.88, "reasoning": "Breve justificativa" },
+    "notes": { "sourceHeader": "Nome da Coluna ou null", "confidence": 0.85, "reasoning": "Breve justificativa" }
+  },
+  "analysis": "Resumo da análise das colunas da planilha pela IA"
+}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.7-flash",
+      contents: promptText,
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.2
+      }
+    });
+
+    const text = response.text || "";
+    try {
+      const parsed = JSON.parse(text.trim());
+      return res.json({ ...parsed, isSimulated: false });
+    } catch (parseErr) {
+      console.error("Failed to parse Gemini Migration Mapping JSON:", text);
+      return res.json(generateSimulatedMapping());
+    }
+  } catch (err: any) {
+    console.error("Gemini Migration Mapping API error:", err);
+    return res.json(generateSimulatedMapping());
+  }
+});
+
 // Serve frontend assets
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

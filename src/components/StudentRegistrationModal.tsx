@@ -50,12 +50,33 @@ export default function StudentRegistrationModal({
   const [plan, setPlan] = useState<SubscriptionPlan>("Mensal");
   const [planValue, setPlanValue] = useState(250);
   const [billingType, setBillingType] = useState<PaymentBillingType>("PIX");
+  const [paymentDueDay, setPaymentDueDay] = useState<number>(10);
+
+  // Helper to compute next month's payment date from due day
+  const getNextPaymentDate = (dueDay: number) => {
+    const today = new Date();
+    let year = today.getFullYear();
+    let month = today.getMonth() + 1; // next month
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+    const day = Math.min(dueDay, lastDayOfMonth);
+    const mStr = String(month + 1).padStart(2, "0");
+    const dStr = String(day).padStart(2, "0");
+    return `${year}-${mStr}-${dStr}`;
+  };
+
+  const nextPaymentDateFormatted = getNextPaymentDate(paymentDueDay);
 
   const [toastSuccess, setToastSuccess] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
+
+    const computedNextDate = getNextPaymentDate(paymentDueDay);
 
     onAddStudent({
       academyId: targetAcademyId,
@@ -72,6 +93,8 @@ export default function StudentRegistrationModal({
       stripes: Number(stripes),
       plan,
       planValue: Number(planValue),
+      paymentDueDay: Number(paymentDueDay),
+      nextPaymentDate: computedNextDate,
       billingType,
       attendance30Days: 12,
       daysSinceLastClass: 0,
@@ -325,7 +348,11 @@ export default function StudentRegistrationModal({
               </div>
 
               <div className="space-y-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800">
-                <h4 className="text-xs font-bold text-slate-300 uppercase">Plano de Mensalidade</h4>
+                <h4 className="text-xs font-bold text-slate-300 uppercase flex items-center justify-between">
+                  <span>Plano & Cobrança Recorrente</span>
+                  <span className="text-[10px] text-emerald-400 font-mono font-normal">Asaas Gateway</span>
+                </h4>
+                
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">Periodicidade</label>
@@ -342,16 +369,73 @@ export default function StudentRegistrationModal({
                   </div>
 
                   <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">Valor Mensal (R$)</label>
+                    <label className="block text-[11px] text-slate-400 mb-1">Valor da Mensalidade (R$)</label>
                     <input
                       type="number"
                       value={planValue}
                       onChange={(e) => setPlanValue(Number(e.target.value))}
-                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-emerald-400 font-bold"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-emerald-400 font-bold font-mono"
                     />
                   </div>
                 </div>
+
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Dia de Vencimento Todo Mês</label>
+                    <select
+                      value={paymentDueDay}
+                      onChange={(e) => setPaymentDueDay(Number(e.target.value))}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-blue-300 font-bold"
+                    >
+                      <option value={5}>Dia 05 de cada mês</option>
+                      <option value={10}>Dia 10 de cada mês</option>
+                      <option value={15}>Dia 15 de cada mês</option>
+                      <option value={20}>Dia 20 de cada mês</option>
+                      <option value={25}>Dia 25 de cada mês</option>
+                      <option value={28}>Dia 28 de cada mês</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">Forma de Pagamento</label>
+                    <select
+                      value={billingType}
+                      onChange={(e) => setBillingType(e.target.value as PaymentBillingType)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 font-bold"
+                    >
+                      <option value="PIX">⚡ PIX Dinâmico (Asaas)</option>
+                      <option value="BOLETO">📄 Boleto Bancário</option>
+                      <option value="CREDIT_CARD">💳 Cartão de Crédito</option>
+                      <option value="CASH">💵 Dinheiro / Balcão</option>
+                    </select>
+                  </div>
+                </div>
               </div>
+            </div>
+
+            {/* Next Month Payment Summary Card */}
+            <div className="bg-gradient-to-r from-blue-950/40 via-indigo-950/30 to-slate-900 border border-blue-500/30 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-blue-300 flex items-center gap-1.5 font-display text-xs">
+                  <Calendar className="w-4 h-4 text-blue-400" />
+                  Cobrança Automática para o Mês Seguinte
+                </span>
+                <span className="text-[10px] bg-blue-500/20 text-blue-200 px-2 py-0.5 rounded-full font-mono font-bold">
+                  Próximo Vencimento: {nextPaymentDateFormatted.split("-").reverse().join("/")}
+                </span>
+              </div>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                Ao concluir a matrícula, a data de pagamento para o mês seguinte (<strong>{nextPaymentDateFormatted.split("-").reverse().join("/")}</strong>) será salva e a mensalidade de <strong>R$ {planValue},00</strong> gerada automaticamente no Financeiro.
+                {category === "Kids / Infantil" && guardianPhone ? (
+                  <span className="block mt-1 text-amber-300 text-[11px]">
+                    👨‍👩‍👧 Cobranças e lembretes com juros por atraso serão direcionados para o WhatsApp dos Pais: <strong>{guardianName || "Responsável"} ({guardianPhone})</strong>.
+                  </span>
+                ) : (
+                  <span className="block mt-1 text-slate-400 text-[11px]">
+                    🥋 Cobranças e lembretes serão enviados para o contato do aluno: <strong>{phone || "WhatsApp Cadastrado"}</strong>.
+                  </span>
+                )}
+              </p>
             </div>
 
             {/* Form Actions */}

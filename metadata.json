@@ -1,6 +1,6 @@
 {
   "name": "BJJ Academy",
-  "description": "A complete Brazilian Jiu-Jitsu Academy SaaS and Training Management platform, featuring a multi-unit dashboard, CRM lead funnel, automatic billing with PIX generation, and an AI Study Plan & Loyalty Coach powered by Gemini.",
+  "description": "A comprehensive Brazilian Jiu-Jitsu Academy SaaS platform with multi-tenant finances, next-month tuition scheduling, late fees, automated WhatsApp notifications, and Universal Data Migration Engine with Staging Area, Gemini AI-assisted mapping, transactional integrity, and snapshot checkpoints.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

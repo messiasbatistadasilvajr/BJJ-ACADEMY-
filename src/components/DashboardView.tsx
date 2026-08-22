@@ -3,8 +3,9 @@ import { Academy, Student, PaymentHistory, Instructor } from "../types";
 import { 
   Building2, Users, CreditCard, ShieldAlert, 
   ArrowUpRight, Award, TrendingUp, Calendar, Clock, Activity, CheckCircle2,
-  Cake, Gift, MessageSquare, X
+  Cake, Gift, MessageSquare, X, UserPlus, Plus, Database, UploadCloud
 } from "lucide-react";
+import StudentRegistrationModal from "./StudentRegistrationModal";
 
 interface DashboardViewProps {
   academies: Academy[];
@@ -13,6 +14,7 @@ interface DashboardViewProps {
   payments: PaymentHistory[];
   onNavigate: (tab: string) => void;
   onSelectStudent: (student: Student) => void;
+  onAddStudent?: (studentData: Omit<Student, "id">) => void;
 }
 
 export default function DashboardView({ 
@@ -21,9 +23,23 @@ export default function DashboardView({
   instructors = [],
   payments, 
   onNavigate,
-  onSelectStudent
+  onSelectStudent,
+  onAddStudent
 }: DashboardViewProps) {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [selectedAcademyForRegister, setSelectedAcademyForRegister] = useState<string>("");
+
+  const triggerToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4500);
+  };
+
+  const handleOpenRegister = (academyId?: string) => {
+    const target = academyId || (isSingleAcademy && activeAcademy ? activeAcademy.id : (academies[0]?.id || "ac-1"));
+    setSelectedAcademyForRegister(target);
+    setIsRegisterModalOpen(true);
+  };
 
   // Aggregate KPIs
   const totalStudents = students.length;
@@ -167,11 +183,31 @@ export default function DashboardView({
             </p>
           </div>
           
-          <div className="flex items-center gap-2.5 bg-slate-950/80 border border-slate-800/90 px-4 py-3 rounded-2xl self-start md:self-center shadow-lg backdrop-blur-md">
-            <Calendar className="w-4 h-4 text-blue-400" />
-            <div className="text-left font-sans">
-              <span className="text-[9px] text-slate-400 block uppercase font-bold tracking-wider">Data de Hoje</span>
-              <span className="text-xs text-slate-200 font-bold block">{capitalizedDate}</span>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 self-start md:self-center">
+            <button
+              onClick={() => onNavigate("migration")}
+              className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs px-4 py-3 rounded-2xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 border border-blue-400/30 cursor-pointer active:scale-95"
+            >
+              <UploadCloud className="w-4 h-4 text-blue-100" />
+              <span>Migrar Alunos (Excel/CSV)</span>
+            </button>
+
+            {onAddStudent && (
+              <button
+                onClick={() => handleOpenRegister()}
+                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs px-4 py-3 rounded-2xl transition-all shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2 border border-emerald-400/30 cursor-pointer active:scale-95"
+              >
+                <UserPlus className="w-4 h-4 text-emerald-100" />
+                <span>{activeAcademy ? `+ Novo Aluno (${activeAcademy.name.split(" ")[0]})` : "+ Cadastrar Novo Aluno"}</span>
+              </button>
+            )}
+
+            <div className="flex items-center gap-2.5 bg-slate-950/80 border border-slate-800/90 px-4 py-3 rounded-2xl shadow-lg backdrop-blur-md">
+              <Calendar className="w-4 h-4 text-blue-400" />
+              <div className="text-left font-sans">
+                <span className="text-[9px] text-slate-400 block uppercase font-bold tracking-wider">Data de Hoje</span>
+                <span className="text-xs text-slate-200 font-bold block">{capitalizedDate}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -472,6 +508,18 @@ export default function DashboardView({
                         <strong className="text-slate-300 text-sm">{ac.instructorsCount}</strong>
                       </div>
                     </div>
+
+                    {onAddStudent && (
+                      <div className="mt-3 pt-2.5 border-t border-slate-800/50 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRegister(ac.id)}
+                          className="w-full bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 py-1.5 px-3 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1.5 transition-all"
+                        >
+                          <UserPlus className="w-3.5 h-3.5" /> + Matricular Aluno ({ac.name.split(" ")[0]})
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -701,6 +749,21 @@ export default function DashboardView({
 
         </div>
       </div>
+
+      {/* Student Registration Modal Triggered from Dashboard Header / Academy Cards */}
+      {isRegisterModalOpen && onAddStudent && (
+        <StudentRegistrationModal 
+          isOpen={isRegisterModalOpen}
+          onClose={() => setIsRegisterModalOpen(false)}
+          academies={academies}
+          selectedAcademyId={selectedAcademyForRegister}
+          onAddStudent={(stData) => {
+            onAddStudent(stData);
+            const targetAc = academies.find(a => a.id === stData.academyId);
+            triggerToast(`🎉 Aluno ${stData.name} cadastrado com sucesso na academia ${targetAc ? targetAc.name : "selecionada"}!`);
+          }}
+        />
+      )}
     </div>
   );
 }

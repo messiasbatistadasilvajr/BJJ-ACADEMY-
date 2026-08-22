@@ -4,7 +4,7 @@ import {
   Building2, Plus, Shield, ShieldCheck, UserCheck, 
   MapPin, Check, Save, UserX, ToggleLeft, ToggleRight, ListFilter,
   Search, Phone, Mail, ArrowRight, Sparkles, CheckCircle2, DollarSign, Users, Smartphone, X,
-  UserPlus, Award, Calendar, CreditCard, ChevronRight, Filter, Eye
+  UserPlus, Award, Calendar, CreditCard, ChevronRight, Filter, Eye, UploadCloud, Database
 } from "lucide-react";
 import StudentRegistrationModal from "./StudentRegistrationModal";
 
@@ -14,6 +14,7 @@ interface AcademyManagerProps {
   onAddAcademy: (newAc: Omit<Academy, "id">) => void;
   onAddStudent?: (studentData: Omit<Student, "id">) => void;
   onSwitchTenant?: (tenantId: string) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 export default function AcademyManager({ 
@@ -21,7 +22,8 @@ export default function AcademyManager({
   students = [], 
   onAddAcademy, 
   onAddStudent, 
-  onSwitchTenant 
+  onSwitchTenant,
+  onNavigate 
 }: AcademyManagerProps) {
   const [activeTab, setActiveTab] = useState<"units" | "students" | "permissions">("units");
   const [searchTerm, setSearchTerm] = useState("");
@@ -118,8 +120,8 @@ export default function AcademyManager({
   const [roles, setRoles] = useState([
     {
       id: "rl-1",
-      name: "Administrador Geral (SaaS Owner)",
-      description: "Acesso total irrestrito a todas as unidades, relatórios financeiros consolidados e gerenciamento de faturas.",
+      name: "Administrador Geral (Messias Batista)",
+      description: "Acesso total irrestrito a todas as academias contratantes, relatórios financeiros consolidados e emissão de cobranças.",
       permissions: { writeFinance: true, editGraduations: true, attendanceAccess: true, deleteStudents: true }
     },
     {
@@ -320,6 +322,15 @@ export default function AcademyManager({
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
+              {onNavigate && (
+                <button
+                  onClick={() => onNavigate("migration")}
+                  className="bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs px-4 py-3 rounded-xl transition-all shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4 text-indigo-200" /> Migração em Massa (Excel/CSV)
+                </button>
+              )}
+
               {onAddStudent && (
                 <button
                   onClick={() => {
@@ -878,7 +889,7 @@ export default function AcademyManager({
           <div className="bg-slate-950 p-4 border border-slate-800 rounded-xl space-y-2">
             <h4 className="text-xs font-semibold text-slate-400">Log de Auditoria RBAC Recente</h4>
             <div className="space-y-1.5 font-mono text-[11px] text-slate-500">
-              <p><span className="text-slate-400">[2026-07-08 19:10]</span> Mestre Marcelo alterou permissão <strong className="text-slate-300">"editGraduations"</strong> para <strong className="text-amber-500">"Monitor"</strong>.</p>
+              <p><span className="text-slate-400">[2026-07-08 19:10]</span> Messias Batista alterou permissão <strong className="text-slate-300">"editGraduations"</strong> para <strong className="text-amber-500">"Monitor"</strong>.</p>
               <p><span className="text-slate-400">[2026-07-08 16:04]</span> Tenant System revalidou chaves JWT de segurança de todos os secretários.</p>
             </div>
           </div>

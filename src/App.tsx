@@ -24,11 +24,14 @@ import CrmMarketingView from "./components/CrmMarketingView";
 import MobileSimulator from "./components/MobileSimulator";
 import AiCoachView from "./components/AiCoachView";
 import ParentsPortal from "./components/ParentsPortal";
+import MigrationCenter from "./components/MigrationCenter";
+import { MigrationCheckpoint, MigrationReport } from "./types";
 
 // Icons
 import { 
   LayoutDashboard, Building2, Award, CreditCard, 
-  Target, Smartphone, BrainCircuit, Globe, LogOut, HeartHandshake 
+  Target, Smartphone, BrainCircuit, Globe, LogOut, HeartHandshake,
+  Database, UploadCloud
 } from "lucide-react";
 
 export default function App() {
@@ -129,11 +132,69 @@ export default function App() {
   };
 
   const handleAddStudent = (newStudentData: Omit<Student, "id">) => {
+    const studentId = `st-${Date.now()}`;
+    const dueDay = newStudentData.paymentDueDay || 10;
+    
+    // Calculate next month payment date if not already provided
+    let nextDate = newStudentData.nextPaymentDate;
+    if (!nextDate) {
+      const today = new Date();
+      let year = today.getFullYear();
+      let month = today.getMonth() + 1; // next month
+      if (month > 11) {
+        month = 0;
+        year += 1;
+      }
+      const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+      const day = Math.min(dueDay, lastDayOfMonth);
+      const mStr = String(month + 1).padStart(2, "0");
+      const dStr = String(day).padStart(2, "0");
+      nextDate = `${year}-${mStr}-${dStr}`;
+    }
+
     const newStudent: Student = {
       ...newStudentData,
-      id: `st-${Date.now()}`
+      id: studentId,
+      paymentDueDay: dueDay,
+      nextPaymentDate: nextDate,
+      asaasCustomerId: newStudentData.asaasCustomerId || `cus_${Math.floor(Math.random() * 900000 + 100000)}`,
+      asaasSubscriptionId: newStudentData.asaasSubscriptionId || `sub_${Math.floor(Math.random() * 9000000 + 1000000)}`,
     };
+
     setStudents(prev => [newStudent, ...prev]);
+
+    // Automatically generate the next month tuition invoice in PaymentHistory
+    const planAmount = newStudent.planValue || 250;
+    const isGuardianContact = Boolean(newStudent.guardianName && newStudent.guardianPhone);
+    const recipientName = isGuardianContact ? (newStudent.guardianName || "Responsável") : newStudent.name;
+    const recipientPhone = isGuardianContact ? (newStudent.guardianPhone || newStudent.phone) : newStudent.phone;
+    const txId = Math.random().toString(36).substring(2, 12).toUpperCase();
+
+    const newInvoice: PaymentHistory = {
+      id: `pay-${Date.now()}`,
+      academyId: newStudent.academyId,
+      studentId: newStudent.id,
+      studentName: newStudent.name,
+      amount: planAmount,
+      originalAmount: planAmount,
+      date: new Date().toISOString().split("T")[0],
+      dueDate: nextDate,
+      status: "Pending",
+      method: newStudent.billingType || "PIX",
+      asaasInvoiceId: `pay_${Math.floor(Math.random() * 900000000 + 100000000)}`,
+      pixCopiaECola: `00020101021226830014br.gov.bcb.pix2561api.asaas.com/v3/pix/qr/pay_${txId}`,
+      recipientName,
+      recipientPhone,
+      recipientType: isGuardianContact ? "GUARDIAN" : "STUDENT",
+      fineAmount: 0,
+      interestAmount: 0,
+      daysOverdue: 0,
+      updatedTotalAmount: planAmount,
+      notificationCount: 0,
+      notes: `Mensalidade automática gerada no ato da matrícula (${newStudent.plan || "Mensal"}). Próximo vencimento: ${nextDate.split("-").reverse().join("/")}`
+    };
+
+    setPayments(prev => [newInvoice, ...prev]);
   };
 
   const handleUpdateStudent = (updated: Student) => {
@@ -261,6 +322,26 @@ export default function App() {
     setActiveTab("ai-coach");
   };
 
+  // Handler for applying Universal Migration results
+  const handleApplyMigration = (
+    newStudents: Student[],
+    newPayments: PaymentHistory[],
+    newGraduations: GraduationCandidate[],
+    checkpoint: MigrationCheckpoint,
+    report: MigrationReport
+  ) => {
+    setStudents(newStudents);
+    setPayments(newPayments);
+    setGraduations(newGraduations);
+  };
+
+  // Handler for rolling back migration from snapshot checkpoint
+  const handleRollbackMigration = (checkpoint: MigrationCheckpoint) => {
+    setStudents(checkpoint.snapshotState.students);
+    setPayments(checkpoint.snapshotState.payments);
+    setGraduations(checkpoint.snapshotState.graduations);
+  };
+
   return (
     <div className="min-h-screen bg-[#060911] text-slate-100 flex flex-col relative overflow-x-hidden selection:bg-blue-600 selection:text-white" id="app-wrapper">
       
@@ -297,6 +378,7 @@ export default function App() {
           {[
             { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
             { id: "academies", label: "Cadastrar Academias", icon: Building2 },
+            { id: "migration", label: "Central de Migração", icon: Database },
             { id: "training", label: "Jiu-Jitsu / Chamadas", icon: Award },
             { id: "parents-portal", label: "Portal dos Pais (Kids)", icon: HeartHandshake },
             { id: "finance", label: "Financeiro & Recorrência", icon: CreditCard },
@@ -346,16 +428,16 @@ export default function App() {
 
           <div className="flex items-center gap-2.5 border-l border-slate-800/80 pl-4">
             <div className="text-right hidden sm:block">
-              <span className="text-xs text-slate-200 font-bold block truncate max-w-[140px]">
-                {userRole === "super" ? "Mestre Marcelo" :
+              <span className="text-xs text-slate-200 font-bold block truncate max-w-[150px]">
+                {userRole === "super" ? "Messias Batista" :
                  (academies.find(a => a.id === userRole)?.name || "Diretor de Academia")}
               </span>
               <span className="text-[10px] text-slate-400 block font-mono">
-                {userRole === "super" ? "Root Admin" : "Gestor da Unidade"}
+                {userRole === "super" ? "Administrador Geral" : "Gestor da Unidade"}
               </span>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 border border-blue-400/40 flex items-center justify-center font-bold text-xs text-white shadow-md shadow-blue-600/30">
-              {userRole === "super" ? "MM" : "AC"}
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-emerald-600 border border-blue-400/40 flex items-center justify-center font-bold text-xs text-white shadow-md shadow-blue-600/30">
+              {userRole === "super" ? "MB" : "AC"}
             </div>
           </div>
         </div>
@@ -366,6 +448,7 @@ export default function App() {
         {[
           { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
           { id: "academies", label: "Cadastrar Academias", icon: Building2 },
+          { id: "migration", label: "Migração", icon: Database },
           { id: "training", label: "Chamadas", icon: Award },
           { id: "parents-portal", label: "Portal dos Pais", icon: HeartHandshake },
           { id: "finance", label: "Financeiro", icon: CreditCard },
@@ -408,6 +491,7 @@ export default function App() {
               setSelectedStudent(st);
               setActiveTab("ai-coach");
             }}
+            onAddStudent={handleAddStudent}
           />
         )}
 
@@ -417,10 +501,24 @@ export default function App() {
             students={students}
             onAddAcademy={handleAddAcademy}
             onAddStudent={handleAddStudent}
+            onNavigate={(tab) => setActiveTab(tab)}
             onSwitchTenant={(id) => {
               setUserRole(id as any);
               setActiveTab("dashboard");
             }}
+          />
+        )}
+
+        {activeTab === "migration" && (
+          <MigrationCenter 
+            academies={academies}
+            students={students}
+            payments={payments}
+            graduations={graduations}
+            userRole={userRole}
+            onApplyMigration={handleApplyMigration}
+            onRollbackMigration={handleRollbackMigration}
+            onNavigate={(tab) => setActiveTab(tab)}
           />
         )}
 
