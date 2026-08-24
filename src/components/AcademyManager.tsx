@@ -183,9 +183,18 @@ export default function AcademyManager({
             </button>
 
             <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-              <div className="p-3 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
-                <Building2 className="w-6 h-6" />
-              </div>
+              {viewingAcademy.logoUrl ? (
+                <img 
+                  src={viewingAcademy.logoUrl} 
+                  alt={viewingAcademy.name} 
+                  className="w-12 h-12 rounded-xl object-cover border border-slate-700 shadow-md flex-shrink-0" 
+                  referrerPolicy="no-referrer" 
+                />
+              ) : (
+                <div className="p-3 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
+                  <Building2 className="w-6 h-6" />
+                </div>
+              )}
               <div>
                 <h3 className="text-lg font-bold text-white font-display">Alunos da Unidade: {viewingAcademy.name}</h3>
                 <p className="text-xs text-slate-400">{viewingAcademy.unit} • Total de {students.filter(s => s.academyId === viewingAcademy.id).length} alunos cadastrados nesta página.</p>
@@ -556,9 +565,18 @@ export default function AcademyManager({
                 <div key={ac.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden shadow-xl hover:border-slate-700 transition-all flex flex-col justify-between group">
                   <div className="p-5 border-b border-slate-800/80 bg-gradient-to-br from-slate-950/40 via-slate-900/40 to-blue-950/20">
                     <div className="flex items-start justify-between">
-                      <div className="p-3 bg-blue-500/15 rounded-xl border border-blue-500/20 group-hover:bg-blue-500/25 transition-all">
-                        <Building2 className="w-6 h-6 text-blue-400" />
-                      </div>
+                      {ac.logoUrl ? (
+                        <img 
+                          src={ac.logoUrl} 
+                          alt={ac.name} 
+                          className="w-12 h-12 rounded-xl object-cover border border-slate-700 shadow-md flex-shrink-0 group-hover:scale-105 transition-transform" 
+                          referrerPolicy="no-referrer" 
+                        />
+                      ) : (
+                        <div className="p-3 bg-blue-500/15 rounded-xl border border-blue-500/20 group-hover:bg-blue-500/25 transition-all">
+                          <Building2 className="w-6 h-6 text-blue-400" />
+                        </div>
+                      )}
                       <div className="flex flex-col items-end gap-1">
                         <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
                           🟢 Contrato Ativo

@@ -201,9 +201,18 @@ export default function ParentsPortal({ students, academies }: ParentsPortalProp
             <div className="bg-slate-900/80 border border-slate-800 p-6 rounded-2xl space-y-5 shadow-xl backdrop-blur-md">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 text-slate-950 font-black text-2xl flex items-center justify-center shadow-xl shadow-amber-500/20 border-2 border-amber-300">
-                    {activeStudent.name.substring(0, 2).toUpperCase()}
-                  </div>
+                  {activeAcademy?.logoUrl ? (
+                    <img 
+                      src={activeAcademy.logoUrl} 
+                      alt={activeAcademy.name} 
+                      className="w-16 h-16 rounded-2xl object-cover border-2 border-amber-400/40 shadow-xl shadow-amber-500/20 flex-shrink-0" 
+                      referrerPolicy="no-referrer" 
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-500 via-orange-500 to-yellow-400 text-slate-950 font-black text-2xl flex items-center justify-center shadow-xl shadow-amber-500/20 border-2 border-amber-300 flex-shrink-0">
+                      {activeStudent.name.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
                   <div>
                     <div className="flex items-center gap-2">
                       <h2 className="text-xl font-bold text-white font-display">{activeStudent.name}</h2>

@@ -95,16 +95,17 @@ export const initialAcademies: Academy[] = [
   },
   {
     id: "ac-4",
-    name: "Layout Jiu-Jitsu",
-    unit: "Unidade Central - São Paulo",
+    name: "Loyalty Jiu-Jitsu",
+    unit: "Matriz - São Paulo",
     activeStudents: 128,
     monthlyRevenue: 19800,
     pendingGraduations: 14,
     instructorsCount: 4,
-    subdomain: "layout",
-    customDomain: "layout.bjjacademy.app.br",
-    asaasWalletId: "wal_layout_772910482",
-    splitRatePercentage: 95
+    subdomain: "loyalty",
+    customDomain: "loyalty.bjjacademy.app.br",
+    asaasWalletId: "wal_loyalty_772910482",
+    splitRatePercentage: 95,
+    logoUrl: "/loyalty_logo.jpg"
   }
 ];
 

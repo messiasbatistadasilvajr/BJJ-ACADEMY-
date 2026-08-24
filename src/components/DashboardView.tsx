@@ -173,9 +173,19 @@ export default function DashboardView({
               </span>
               <span className="text-[10px] bg-slate-800/80 text-slate-300 px-2.5 py-1 rounded-full font-mono border border-slate-700/50">v1.2</span>
             </div>
-            <h1 className="font-display text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight text-white mt-1">
-              {activeAcademy ? `🥋 ${activeAcademy.name}` : "🥋 BJJ Academy System"}
-            </h1>
+            <div className="flex items-center gap-3 mt-1">
+              {activeAcademy?.logoUrl && (
+                <img 
+                  src={activeAcademy.logoUrl} 
+                  alt={activeAcademy.name} 
+                  className="w-12 h-12 md:w-14 md:h-14 rounded-2xl object-cover border-2 border-blue-500/40 shadow-xl shadow-blue-500/20 flex-shrink-0" 
+                  referrerPolicy="no-referrer" 
+                />
+              )}
+              <h1 className="font-display text-2xl md:text-3xl lg:text-4xl font-bold tracking-tight text-white">
+                {activeAcademy ? (activeAcademy.logoUrl ? activeAcademy.name : `🥋 ${activeAcademy.name}`) : "🥋 BJJ Academy System"}
+              </h1>
+            </div>
             <p className="text-xs md:text-sm text-slate-300 max-w-2xl leading-relaxed">
               {activeAcademy 
                 ? `Gestão da academia contratante ${activeAcademy.name} (${activeAcademy.unit}) via plataforma BJJ Academy. Acompanhe treinos, graduações, finanças e engajamento dos atletas.` 

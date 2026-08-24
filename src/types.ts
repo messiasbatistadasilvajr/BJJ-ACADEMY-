@@ -15,6 +15,7 @@ export interface Academy {
   splitRatePercentage?: number; // e.g. 95 (Academy gets 95%, Platform retains 5%)
   platformFeeFixed?: number; // e.g. 0.00 or R$ 2.90
   status?: "Active" | "Pending_KYC" | "Suspended";
+  logoUrl?: string; // Academy official emblem/logo URL
 }
 
 export interface Instructor {

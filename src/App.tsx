@@ -44,7 +44,24 @@ export default function App() {
   // Global state managers
   const [academies, setAcademies] = useState<Academy[]>(() => {
     const saved = localStorage.getItem("bjj_academies");
-    return saved ? JSON.parse(saved) : initialAcademies;
+    if (!saved) return initialAcademies;
+    try {
+      const parsed: Academy[] = JSON.parse(saved);
+      return parsed.map(ac => {
+        const initial = initialAcademies.find(i => i.id === ac.id);
+        if (initial) {
+          return { 
+            ...initial, 
+            ...ac, 
+            logoUrl: ac.logoUrl || initial.logoUrl, 
+            name: ac.name === "Layout Jiu-Jitsu" ? "Loyalty Jiu-Jitsu" : ac.name 
+          };
+        }
+        return ac;
+      });
+    } catch {
+      return initialAcademies;
+    }
   });
 
   const [instructors, setInstructors] = useState<Instructor[]>(() => {
@@ -436,9 +453,18 @@ export default function App() {
                 {userRole === "super" ? "Administrador Geral" : "Gestor da Unidade"}
               </span>
             </div>
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-emerald-600 border border-blue-400/40 flex items-center justify-center font-bold text-xs text-white shadow-md shadow-blue-600/30">
-              {userRole === "super" ? "MB" : "AC"}
-            </div>
+            {academies.find(a => a.id === userRole)?.logoUrl ? (
+              <img 
+                src={academies.find(a => a.id === userRole)?.logoUrl} 
+                alt="Logo da Academia" 
+                className="w-9 h-9 rounded-xl object-cover border border-blue-400/40 shadow-md shadow-blue-600/30 flex-shrink-0" 
+                referrerPolicy="no-referrer" 
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-emerald-600 border border-blue-400/40 flex items-center justify-center font-bold text-xs text-white shadow-md shadow-blue-600/30">
+                {userRole === "super" ? "MB" : "AC"}
+              </div>
+            )}
           </div>
         </div>
       </nav>

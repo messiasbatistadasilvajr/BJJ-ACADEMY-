@@ -303,11 +303,21 @@ export default function MobileSimulator({
             <div className={`px-5 py-3.5 bg-slate-900 border-b border-slate-850 flex items-center justify-between text-slate-400 ${
               frameMode === "smartphone" ? "pt-8" : "rounded-xl"
             }`}>
-              <div>
-                <span className="text-[10px] font-bold text-white block tracking-wider font-display">🥋 BJJ ACADEMY APP</span>
-                <span className="text-[9px] font-mono flex items-center gap-1 text-slate-400 truncate max-w-[190px]">
-                  <MapPin className="w-2.5 h-2.5 text-blue-400 flex-shrink-0" /> {activeStudentAcademy ? activeStudentAcademy.name : "Academia Contratante"}
-                </span>
+              <div className="flex items-center gap-2.5">
+                {activeStudentAcademy?.logoUrl && (
+                  <img 
+                    src={activeStudentAcademy.logoUrl} 
+                    alt={activeStudentAcademy.name} 
+                    className="w-7 h-7 rounded-lg object-cover border border-slate-700/80 shadow-sm flex-shrink-0" 
+                    referrerPolicy="no-referrer" 
+                  />
+                )}
+                <div>
+                  <span className="text-[10px] font-bold text-white block tracking-wider font-display">🥋 BJJ ACADEMY APP</span>
+                  <span className="text-[9px] font-mono flex items-center gap-1 text-slate-400 truncate max-w-[160px]">
+                    <MapPin className="w-2.5 h-2.5 text-blue-400 flex-shrink-0" /> {activeStudentAcademy ? activeStudentAcademy.name : "Academia Contratante"}
+                  </span>
+                </div>
               </div>
               <span className="text-[10px] font-semibold bg-slate-800 px-2.5 py-1 rounded-full text-slate-300">
                 Área do Aluno
@@ -363,14 +373,24 @@ export default function MobileSimulator({
                     </div>
 
                     <div className="flex justify-between items-start">
-                      <div>
-                        <span className="text-[9px] text-indigo-400 font-mono tracking-widest uppercase block">BJJ ACADEMY • CARTEIRINHA DIGITAL</span>
-                        <strong className="text-white text-base font-display block mt-0.5">{activeStudent.name}</strong>
-                        <span className="text-[10px] text-slate-400 block font-medium font-sans mt-0.5">
-                          {activeStudentAcademy ? activeStudentAcademy.name : "Academia Contratante"}
-                        </span>
+                      <div className="flex items-center gap-2.5">
+                        {activeStudentAcademy?.logoUrl && (
+                          <img 
+                            src={activeStudentAcademy.logoUrl} 
+                            alt={activeStudentAcademy.name} 
+                            className="w-10 h-10 rounded-xl object-cover border border-slate-700/80 shadow-md flex-shrink-0" 
+                            referrerPolicy="no-referrer" 
+                          />
+                        )}
+                        <div>
+                          <span className="text-[9px] text-indigo-400 font-mono tracking-widest uppercase block">BJJ ACADEMY • CARTEIRINHA DIGITAL</span>
+                          <strong className="text-white text-base font-display block mt-0.5">{activeStudent.name}</strong>
+                          <span className="text-[10px] text-slate-400 block font-medium font-sans mt-0.5">
+                            {activeStudentAcademy ? activeStudentAcademy.name : "Academia Contratante"}
+                          </span>
+                        </div>
                       </div>
-                      <span className="text-[8px] bg-slate-950 text-slate-400 px-2 py-0.5 rounded font-mono border border-slate-800">
+                      <span className="text-[8px] bg-slate-950 text-slate-400 px-2 py-0.5 rounded font-mono border border-slate-800 flex-shrink-0">
                         #{activeStudent.id}
                       </span>
                     </div>
