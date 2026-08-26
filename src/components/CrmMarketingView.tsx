@@ -3,8 +3,10 @@ import { Lead, MarketingCampaign } from "../types";
 import { 
   Users, UserPlus, Phone, Mail, FileText, ArrowRight, 
   Send, Smartphone, Play, Plus, Trash2, Calendar, CheckSquare, X,
-  BellRing, Building2, CheckCircle2, MessageSquare, ShieldAlert, Zap, Bell, Check
+  BellRing, Building2, CheckCircle2, MessageSquare, ShieldAlert, Zap, Bell, Check,
+  Square, Sparkles, Layers, RefreshCw, Filter, Search
 } from "lucide-react";
+import BulkCampaignModal from "./BulkCampaignModal";
 
 interface CrmMarketingViewProps {
   leads: Lead[];
@@ -43,6 +45,53 @@ export default function CrmMarketingView({
   // Campaign templates
   const [selectedCampaignTemplate, setSelectedCampaignTemplate] = useState<string>("");
   const [campaignPreview, setCampaignPreview] = useState<string>("");
+
+  // Bulk Campaign & Lead Multi-Select State
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>(() => leads.map(l => l.id));
+  const [showBulkModal, setShowBulkModal] = useState<boolean>(false);
+  const [leadSearchQuery, setLeadSearchQuery] = useState<string>("");
+  const [crmPhaseFilter, setCrmPhaseFilter] = useState<string>("ALL");
+  const [customBulkLogs, setCustomBulkLogs] = useState<{
+    id: string;
+    name: string;
+    recipientsCount: number;
+    timestamp: string;
+    preview: string;
+  }[]>([]);
+
+  const handleToggleLead = (id: string) => {
+    setSelectedLeadIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    setSelectedLeadIds(leads.map(l => l.id));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedLeadIds([]);
+  };
+
+  const handleSelectByPhase = (phase: Lead["phase"]) => {
+    const phaseLeadIds = leads.filter(l => l.phase === phase).map(l => l.id);
+    setSelectedLeadIds(prev => Array.from(new Set([...prev, ...phaseLeadIds])));
+    triggerToast(`Selecionados todos os leads da fase "${getPhaseName(phase)}".`);
+  };
+
+  const handleCampaignDispatched = (campaignInfo: {
+    name: string;
+    recipientsCount: number;
+    timestamp: string;
+    preview: string;
+  }) => {
+    const newLog = {
+      id: `bulk-${Date.now()}`,
+      ...campaignInfo
+    };
+    setCustomBulkLogs(prev => [newLog, ...prev]);
+    triggerToast(`🚀 Campanha em massa "${campaignInfo.name}" disparada com sucesso para ${campaignInfo.recipientsCount} leads via WhatsApp!`);
+  };
 
   // B2B Contract Alert Automation States
   const [adminPhone, setAdminPhone] = useState<string>("+55 (85) 98174-2686");
@@ -572,6 +621,80 @@ export default function CrmMarketingView({
 
           </div>
 
+          {/* NEW: Dedicated Bulk Campaign Launcher Card in Marketing Tab */}
+          <div className="bg-gradient-to-r from-blue-950/40 via-slate-900/90 to-emerald-950/40 border border-blue-500/30 p-5 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-gradient-to-br from-blue-600 via-indigo-600 to-emerald-500 text-white rounded-2xl shadow-lg shadow-blue-500/20 font-bold">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white font-display">Disparo em Massa para Leads (Send Bulk Campaign)</h3>
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                    {leads.length} Leads no CRM
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 max-w-xl">
+                  Envie mensagens automáticas personalizadas via WhatsApp Cloud API para múltiplos visitantes e acelere a conversão de novas matrículas.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start md:self-center flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  handleSelectAll();
+                  setShowBulkModal(true);
+                }}
+                className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2"
+              >
+                <Send className="w-4 h-4 fill-slate-950" /> Disparar para Todos ({leads.length})
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  const captureIds = leads.filter(l => l.phase === "Capture").map(l => l.id);
+                  setSelectedLeadIds(captureIds);
+                  setShowBulkModal(true);
+                }}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all flex items-center gap-1.5"
+              >
+                <Users className="w-3.5 h-3.5 text-blue-400" /> Apenas em Captura ({leads.filter(l => l.phase === "Capture").length})
+              </button>
+            </div>
+          </div>
+
+          {/* History of Dispatched Bulk Campaigns (if any) */}
+          {customBulkLogs.length > 0 && (
+            <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl space-y-3 shadow-lg">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
+                <span>Histórico Recente de Disparos em Massa</span>
+                <span className="text-[10px] text-emerald-400 font-mono font-bold">100% Entregue via WhatsApp API</span>
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {customBulkLogs.map((log) => (
+                  <div key={log.id} className="bg-slate-950 border border-slate-800/80 p-3.5 rounded-xl space-y-1.5 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs">{log.name}</span>
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono font-bold">
+                        {log.recipientsCount} leads
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 truncate font-mono">
+                      "{log.preview}"
+                    </p>
+                    <div className="pt-1.5 border-t border-slate-900 text-[10px] text-slate-500 flex items-center justify-between">
+                      <span>📅 {log.timestamp}</span>
+                      <span className="text-emerald-400 font-medium">✓ Entregue com Sucesso</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             
             {/* Active Campaigns */}
@@ -685,17 +808,76 @@ export default function CrmMarketingView({
 
       {activeTab === "crm" && (
         <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          
+          {/* CRM Top Controls & Bulk Campaign Bar */}
+          <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl backdrop-blur-xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h2 className="text-lg font-bold text-white font-display">CRM de Leads & Matrículas</h2>
-              <p className="text-xs text-slate-400 mt-0.5">Acompanhe visitantes interessados de ponta a ponta e aumente a conversão de matrículas na sua academia.</p>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-white font-display">CRM de Leads & Matrículas</h2>
+                <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2 py-0.5 rounded-full font-mono font-bold">
+                  {leads.length} Contatos
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Selecione os contatos com o checkbox para disparar campanhas automáticas em massa via WhatsApp Oficial.
+              </p>
             </div>
-            <button
-              onClick={() => setShowAddLead(!showAddLead)}
-              className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-blue-600/20"
-            >
-              <UserPlus className="w-4 h-4" /> Cadastrar Novo Lead / Visitante
-            </button>
+
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Send Bulk Campaign Button */}
+              <button
+                type="button"
+                onClick={() => setShowBulkModal(true)}
+                className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-slate-950 font-black text-xs px-4 py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2"
+              >
+                <Send className="w-4 h-4 fill-slate-950" />
+                <span>Disparo em Massa WhatsApp</span>
+                <span className="bg-slate-950 text-emerald-300 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                  {selectedLeadIds.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowAddLead(!showAddLead)}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-blue-600/20"
+              >
+                <UserPlus className="w-4 h-4" /> Cadastrar Lead
+              </button>
+            </div>
+          </div>
+
+          {/* Search & Phase Filters Toolbar */}
+          <div className="bg-slate-950/60 border border-slate-800/80 p-3 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={leadSearchQuery}
+                  onChange={(e) => setLeadSearchQuery(e.target.value)}
+                  placeholder="Buscar lead por nome ou tel..."
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+              >
+                Marcar Todos ({leads.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleDeselectAll}
+                className="text-[11px] bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+              >
+                Desmarcar
+              </button>
+            </div>
           </div>
 
           {/* New Lead Form */}
@@ -767,72 +949,180 @@ export default function CrmMarketingView({
           {/* Kanban Board */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
             {phases.map((phase) => {
-              const phaseLeads = leads.filter(l => l.phase === phase);
+              const phaseLeads = leads
+                .filter(l => l.phase === phase)
+                .filter(l => {
+                  if (!leadSearchQuery) return true;
+                  const query = leadSearchQuery.toLowerCase();
+                  return l.name.toLowerCase().includes(query) || l.phone.includes(query);
+                });
+
+              const allPhaseSelected = phaseLeads.length > 0 && phaseLeads.every(l => selectedLeadIds.includes(l.id));
+
               return (
-                <div key={phase} className="bg-slate-900/40 border border-slate-800/90 rounded-2xl p-3 min-w-[210px] space-y-3 flex flex-col shadow-md">
-                  {/* Phase Title */}
+                <div key={phase} className="bg-slate-900/40 border border-slate-800/90 rounded-2xl p-3 min-w-[220px] space-y-3 flex flex-col shadow-md">
+                  {/* Phase Title & Multi-Select Column Header */}
                   <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                    <span className="text-[11px] font-bold text-slate-200 tracking-wide">
-                      {getPhaseName(phase)}
-                    </span>
-                    <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded-full">
-                      {phaseLeads.length}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-bold text-slate-200 tracking-wide">
+                        {getPhaseName(phase)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectByPhase(phase)}
+                        title="Marcar todos desta fase"
+                        className="text-[9px] bg-slate-800 hover:bg-slate-700 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold transition-colors"
+                      >
+                        +Fase
+                      </button>
+                      <span className="text-[10px] bg-slate-800 text-slate-300 font-bold px-2 py-0.5 rounded-full font-mono">
+                        {phaseLeads.length}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Phase Cards */}
-                  <div className="space-y-2.5 flex-1 max-h-[420px] overflow-y-auto">
+                  <div className="space-y-2.5 flex-1 max-h-[440px] overflow-y-auto pr-0.5">
                     {phaseLeads.length === 0 ? (
                       <div className="text-center py-8 text-slate-600 text-[11px] border border-dashed border-slate-800/60 rounded-xl">
                         Nenhum contato
                       </div>
                     ) : (
-                      phaseLeads.map((lead) => (
-                        <div key={lead.id} className="bg-slate-950 border border-slate-800 p-3 rounded-xl space-y-2 hover:border-slate-700 transition-colors shadow-sm">
-                          <div className="flex justify-between items-start gap-1">
-                            <h4 className="font-bold text-slate-200 text-xs">{lead.name}</h4>
-                          </div>
-                          <p className="text-[10px] text-slate-400 leading-relaxed font-normal">
-                            {lead.notes}
-                          </p>
-                          <div className="pt-2 border-t border-slate-900 flex justify-between items-center gap-2">
-                            <span className="text-[10px] font-mono text-slate-400 font-medium">
-                              📅 {formatDateBR(lead.dateCreated)}
-                            </span>
-                            
-                            {/* Phase transitions switcher */}
-                            <div className="flex gap-1">
-                              {phase !== "Won" && (
+                      phaseLeads.map((lead) => {
+                        const isSelected = selectedLeadIds.includes(lead.id);
+                        return (
+                          <div 
+                            key={lead.id} 
+                            className={`p-3 rounded-xl space-y-2 transition-all shadow-sm relative ${
+                              isSelected 
+                                ? "bg-slate-950 border-2 border-emerald-500/70 shadow-emerald-500/10 shadow-md" 
+                                : "bg-slate-950 border border-slate-800 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => {
-                                    const nextPhaseMap: Record<Lead["phase"], Lead["phase"]> = {
-                                      "Capture": "Trial Scheduled",
-                                      "Trial Scheduled": "Trial Attended",
-                                      "Trial Attended": "Proposal",
-                                      "Proposal": "Won",
-                                      "Won": "Won",
-                                      "Lost": "Lost"
-                                    };
-                                    onUpdateLeadPhase(lead.id, nextPhaseMap[phase]);
-                                  }}
-                                  className="text-[9px] bg-slate-900 hover:bg-slate-800 border border-slate-800 text-blue-400 px-2 py-1 rounded-lg flex items-center gap-0.5 font-bold"
-                                  title="Avançar fase no funil"
+                                  type="button"
+                                  onClick={() => handleToggleLead(lead.id)}
+                                  className={`w-4 h-4 rounded flex items-center justify-center transition-all ${
+                                    isSelected 
+                                      ? "bg-emerald-500 text-slate-950" 
+                                      : "border border-slate-700 hover:border-emerald-400 bg-slate-900"
+                                  }`}
+                                  title={isSelected ? "Desmarcar para campanha" : "Selecionar para disparo em massa"}
                                 >
-                                  Avançar <ArrowRight className="w-2.5 h-2.5" />
+                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
                                 </button>
-                              )}
+                                <h4 className="font-bold text-slate-200 text-xs truncate max-w-[130px]">{lead.name}</h4>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedLeadIds([lead.id]);
+                                  setShowBulkModal(true);
+                                }}
+                                title="Disparar mensagem no WhatsApp"
+                                className="text-emerald-400 hover:text-emerald-300 p-1 rounded hover:bg-slate-900"
+                              >
+                                <MessageSquare className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            <p className="text-[10px] text-slate-400 leading-relaxed font-normal line-clamp-2">
+                              {lead.notes}
+                            </p>
+
+                            <div className="pt-2 border-t border-slate-900 flex justify-between items-center gap-2">
+                              <span className="text-[10px] font-mono text-slate-400 font-medium">
+                                📅 {formatDateBR(lead.dateCreated)}
+                              </span>
+                              
+                              {/* Phase transitions switcher */}
+                              <div className="flex gap-1">
+                                {phase !== "Won" && (
+                                  <button
+                                    onClick={() => {
+                                      const nextPhaseMap: Record<Lead["phase"], Lead["phase"]> = {
+                                        "Capture": "Trial Scheduled",
+                                        "Trial Scheduled": "Trial Attended",
+                                        "Trial Attended": "Proposal",
+                                        "Proposal": "Won",
+                                        "Won": "Won",
+                                        "Lost": "Lost"
+                                      };
+                                      onUpdateLeadPhase(lead.id, nextPhaseMap[phase]);
+                                    }}
+                                    className="text-[9px] bg-slate-900 hover:bg-slate-800 border border-slate-800 text-blue-400 px-2 py-1 rounded-lg flex items-center gap-0.5 font-bold"
+                                    title="Avançar fase no funil"
+                                  >
+                                    Avançar <ArrowRight className="w-2.5 h-2.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
               );
             })}
           </div>
+
+          {/* Sticky Floating Action Bar when Leads are selected */}
+          {selectedLeadIds.length > 0 && (
+            <div className="sticky bottom-4 z-40 bg-slate-900/95 border-2 border-emerald-500/60 p-4 rounded-2xl shadow-2xl backdrop-blur-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in slide-in-from-bottom-3 duration-200">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold">
+                  <CheckSquare className="w-5 h-5" />
+                </div>
+                <div>
+                  <span className="text-sm font-bold text-white font-display block">
+                    {selectedLeadIds.length} lead{selectedLeadIds.length > 1 ? "s" : ""} selecionado{selectedLeadIds.length > 1 ? "s" : ""}
+                  </span>
+                  <span className="text-xs text-slate-400">
+                    Prontos para envio em lote de notificação via WhatsApp Cloud API
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={handleDeselectAll}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs px-3 py-2 rounded-xl transition-all"
+                >
+                  Desmarcar Todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBulkModal(true)}
+                  className="bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-slate-950 font-black text-xs px-5 py-2.5 rounded-xl transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4 fill-slate-950" /> Iniciar Disparo em Massa
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
+
+      {/* Bulk Campaign & WhatsApp Notification Payload Modal */}
+      <BulkCampaignModal
+        isOpen={showBulkModal}
+        onClose={() => setShowBulkModal(false)}
+        allLeads={leads}
+        selectedLeadIds={selectedLeadIds}
+        onToggleLead={handleToggleLead}
+        onSelectAll={handleSelectAll}
+        onDeselectAll={handleDeselectAll}
+        onCampaignDispatched={handleCampaignDispatched}
+      />
     </div>
   );
 }

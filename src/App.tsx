@@ -25,13 +25,14 @@ import MobileSimulator from "./components/MobileSimulator";
 import AiCoachView from "./components/AiCoachView";
 import ParentsPortal from "./components/ParentsPortal";
 import MigrationCenter from "./components/MigrationCenter";
+import SaasBillingView from "./components/SaasBillingView";
 import { MigrationCheckpoint, MigrationReport } from "./types";
 
 // Icons
 import { 
   LayoutDashboard, Building2, Award, CreditCard, 
   Target, Smartphone, BrainCircuit, Globe, LogOut, HeartHandshake,
-  Database, UploadCloud
+  Database, UploadCloud, Coins, Sparkles, ShieldCheck
 } from "lucide-react";
 
 export default function App() {
@@ -391,31 +392,44 @@ export default function App() {
         </div>
 
         {/* Desktop Tabs */}
-        <div className="hidden lg:flex items-center gap-1.5 bg-slate-900/60 p-1.5 rounded-2xl border border-slate-800/80 backdrop-blur-md">
-          {[
+        <div className="hidden lg:flex items-center gap-1.5 bg-slate-900/60 p-1.5 rounded-2xl border border-slate-800/80 backdrop-blur-md overflow-x-auto max-w-4xl">
+          {(userRole === "super" ? [
             { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { id: "saas-billing", label: "Painel Master SaaS", icon: Coins, highlight: true },
             { id: "academies", label: "Cadastrar Academias", icon: Building2 },
             { id: "migration", label: "Central de Migração", icon: Database },
             { id: "training", label: "Jiu-Jitsu / Chamadas", icon: Award },
-            { id: "parents-portal", label: "Portal dos Pais (Kids)", icon: HeartHandshake },
+            { id: "parents-portal", label: "Portal dos Pais", icon: HeartHandshake },
             { id: "finance", label: "Financeiro & Recorrência", icon: CreditCard },
             { id: "crm", label: "CRM & Vendas", icon: Target },
-            { id: "mobile", label: "Simulador App Aluno", icon: Smartphone },
-            { id: "ai-coach", label: "AI BJJ Academy Coach", icon: BrainCircuit },
-          ].map((tab) => {
+            { id: "mobile", label: "App Aluno", icon: Smartphone },
+            { id: "ai-coach", label: "AI Coach", icon: BrainCircuit },
+          ] : [
+            { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+            { id: "training", label: "Jiu-Jitsu / Chamadas", icon: Award },
+            { id: "parents-portal", label: "Portal dos Pais", icon: HeartHandshake },
+            { id: "finance", label: "Financeiro da Unidade", icon: CreditCard },
+            { id: "crm", label: "CRM & Vendas", icon: Target },
+            { id: "mobile", label: "App Aluno", icon: Smartphone },
+            { id: "ai-coach", label: "AI Coach", icon: BrainCircuit },
+          ]).map((tab: any) => {
             const Icon = tab.icon;
             const isSelected = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
                   isSelected 
-                    ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 border border-blue-400/30" 
-                    : "text-slate-300 hover:text-white hover:bg-slate-800/60"
+                    ? tab.highlight
+                      ? "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold shadow-lg shadow-amber-500/25 border border-amber-400"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/25 border border-blue-400/30" 
+                    : tab.highlight
+                      ? "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 border border-amber-500/30 font-bold"
+                      : "text-slate-300 hover:text-white hover:bg-slate-800/60"
                 }`}
               >
-                <Icon className={`w-3.5 h-3.5 ${isSelected ? "text-white" : "text-blue-400"}`} />
+                <Icon className={`w-3.5 h-3.5 ${isSelected ? (tab.highlight ? "text-slate-950" : "text-white") : (tab.highlight ? "text-amber-400" : "text-blue-400")}`} />
                 {tab.label}
               </button>
             );
@@ -471,17 +485,26 @@ export default function App() {
 
       {/* Mobile Sticky Tabs Bar */}
       <div className="lg:hidden bg-slate-950/90 backdrop-blur-md border-b border-slate-800/80 px-2 py-2 overflow-x-auto flex gap-1.5 scrollbar-none sticky top-[57px] z-40">
-        {[
+        {(userRole === "super" ? [
           { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-          { id: "academies", label: "Cadastrar Academias", icon: Building2 },
+          { id: "saas-billing", label: "SaaS Master", icon: Coins, highlight: true },
+          { id: "academies", label: "Academias", icon: Building2 },
           { id: "migration", label: "Migração", icon: Database },
           { id: "training", label: "Chamadas", icon: Award },
-          { id: "parents-portal", label: "Portal dos Pais", icon: HeartHandshake },
+          { id: "parents-portal", label: "Portal Pais", icon: HeartHandshake },
           { id: "finance", label: "Financeiro", icon: CreditCard },
           { id: "crm", label: "CRM", icon: Target },
           { id: "mobile", label: "App Aluno", icon: Smartphone },
           { id: "ai-coach", label: "AI Coach", icon: BrainCircuit },
-        ].map((tab) => {
+        ] : [
+          { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+          { id: "training", label: "Chamadas", icon: Award },
+          { id: "parents-portal", label: "Portal Pais", icon: HeartHandshake },
+          { id: "finance", label: "Financeiro", icon: CreditCard },
+          { id: "crm", label: "CRM", icon: Target },
+          { id: "mobile", label: "App Aluno", icon: Smartphone },
+          { id: "ai-coach", label: "AI Coach", icon: BrainCircuit },
+        ]).map((tab: any) => {
           const Icon = tab.icon;
           const isSelected = activeTab === tab.id;
           return (
@@ -490,8 +513,12 @@ export default function App() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold flex-shrink-0 transition-all ${
                 isSelected 
-                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md border border-blue-400/30" 
-                  : "text-slate-300 hover:text-white bg-slate-900/60"
+                  ? tab.highlight
+                    ? "bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold shadow-md border border-amber-400"
+                    : "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md border border-blue-400/30" 
+                  : tab.highlight
+                    ? "text-amber-400 bg-amber-500/10 border border-amber-500/30 font-bold"
+                    : "text-slate-300 hover:text-white bg-slate-900/60"
               }`}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -518,6 +545,13 @@ export default function App() {
               setActiveTab("ai-coach");
             }}
             onAddStudent={handleAddStudent}
+          />
+        )}
+
+        {activeTab === "saas-billing" && (
+          <SaasBillingView 
+            academies={academies}
+            students={students}
           />
         )}
 

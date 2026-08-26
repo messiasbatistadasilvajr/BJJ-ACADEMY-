@@ -337,20 +337,48 @@ export interface MarketingCampaign {
   targetAudience: string;
 }
 
+export type SaasInvoiceStatus = "PAID" | "PENDING" | "OVERDUE" | "CANCELLED";
+
 export interface SaasPlatformInvoice {
   id: string;
   academyId: string;
   academyName: string;
   unit: string;
-  planName: "Starter SaaS" | "Pro SaaS" | "Enterprise SaaS";
-  amount: number;
-  dueDate: string;
+  ownerName?: string;
+  ownerPhone?: string;
+  ownerEmail?: string;
+  invoiceMonth: string; // e.g. "Agosto/2026"
+  activeStudentsCount: number;
+  fixedFee: number; // R$ 130,00
+  perStudentFee: number; // R$ 1,30
+  variableAmount: number; // activeStudentsCount * 1.30
+  amount: number; // 130 + variableAmount
+  dueDate: string; // e.g. "2026-09-10"
   paymentDate?: string;
-  status: "PAID" | "PENDING" | "OVERDUE";
+  status: SaasInvoiceStatus;
   billingType: PaymentBillingType;
   pixCopiaECola?: string;
+  pixQrCodeUrl?: string;
   pdfUrl?: string;
+  bankSlipUrl?: string;
   asaasInvoiceId?: string;
+  lastSentAt?: string;
+  sentChannel?: "WHATSAPP" | "EMAIL" | "PIX_LINK" | "MANUAL";
+  notes?: string;
+}
+
+export interface SaasMasterBillingOverview {
+  totalAcademies: number;
+  activeAcademies: number;
+  totalActiveStudents: number;
+  fixedFeeUnit: number; // 130.00
+  perStudentFeeUnit: number; // 1.30
+  projectedRevenue: number;
+  receivedRevenue: number;
+  pendingRevenue: number;
+  overdueRevenue: number;
+  billingMonth: string; // e.g. "Agosto/2026"
+  invoices: SaasPlatformInvoice[];
 }
 
 export interface RedisWebhookJob {

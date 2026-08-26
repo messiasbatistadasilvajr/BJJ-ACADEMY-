@@ -45,17 +45,66 @@ export function tenantContextMiddleware(req: Request, res: Response, next: NextF
 
   if (!tenantId && !isPublicRoute) {
     // In dev / preview fallback to default tenant 'ac-1' (Gracie Barra) with warning
-    (req as any).tenant = { tenantId: "ac-1", role: "GESTOR_ACADEMIA" };
+    (req as any).tenant = { tenantId: "ac-1", role: (req.headers["x-user-role"] as string) || "GESTOR_ACADEMIA" };
     return next();
   }
 
   (req as any).tenant = {
     tenantId: tenantId || "ac-1",
     userId: req.headers["x-user-id"] as string || "usr-default",
-    role: req.headers["x-user-role"] as string || "GESTOR_ACADEMIA"
+    role: (req.headers["x-user-role"] as string) || (req.headers["x-role"] as string) || "GESTOR_ACADEMIA"
   };
 
   next();
+}
+
+/**
+ * RBAC Guard: Requires SUPER_ADMIN / ADMIN_MASTER role
+ * Prevents academy managers from accessing master SaaS billing or other academies' financial data.
+ */
+export function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  const userRole = (req as any).tenant?.role || req.headers["x-user-role"] || req.headers["x-role"];
+  
+  if (userRole === "SUPER_ADMIN" || userRole === "ADMIN_MASTER" || userRole === "super") {
+    return next();
+  }
+
+  return res.status(403).json({
+    success: false,
+    error: "ACESSO_NEGADO_SUPER_ADMIN",
+    message: "Apenas o Administrador Master (SUPER_ADMIN) do BJJ Academy possui autorização para acessar o Faturamento SaaS da plataforma e dados consolidados.",
+    attemptedRole: userRole,
+    requiredRole: "SUPER_ADMIN"
+  });
+}
+
+/**
+ * RBAC Guard: Ensures academy managers can only access their own academy's resources.
+ */
+export function requireSameAcademyOrSuperAdmin(paramName: string = "academyId") {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const userRole = (req as any).tenant?.role || req.headers["x-user-role"] || req.headers["x-role"];
+    const userTenantId = (req as any).tenant?.tenantId;
+    const targetAcademyId = req.params[paramName] || req.query[paramName] || (req.body && req.body[paramName]);
+
+    // Super Admin can access any academy
+    if (userRole === "SUPER_ADMIN" || userRole === "ADMIN_MASTER" || userRole === "super") {
+      return next();
+    }
+
+    // Academy Manager can only access their assigned academyId
+    if (userTenantId && targetAcademyId && userTenantId === targetAcademyId) {
+      return next();
+    }
+
+    return res.status(403).json({
+      success: false,
+      error: "ISOLAMENTO_TENANT_VIOLADO",
+      message: `Acesso negado: Você só pode visualizar dados da sua própria academia (${userTenantId}).`,
+      userTenantId,
+      targetAcademyId
+    });
+  };
 }
 
 /**

@@ -4,7 +4,12 @@ import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { webhookQueue } from "./src/server/redisQueue";
-import { tenantContextMiddleware, auditDatabaseTenantIndexing } from "./src/server/tenantSecurity";
+import { 
+  tenantContextMiddleware, 
+  auditDatabaseTenantIndexing,
+  requireSuperAdmin,
+  requireSameAcademyOrSuperAdmin 
+} from "./src/server/tenantSecurity";
 
 dotenv.config();
 
@@ -181,6 +186,298 @@ app.get("/api/asaas/subaccounts", (req, res) => {
         autoTransferDaily: true
       }
     ]
+  });
+});
+
+// ==========================================
+// SAAS PLATFORM BILLING & RBAC API (SUPER_ADMIN ONLY)
+// R$ 130,00 Taxa Fixa + R$ 1,30 por Aluno Ativo
+// ==========================================
+
+// In-memory store for SaaS Invoices (persists during server runtime)
+let saasPlatformInvoices = [
+  {
+    id: "saas-inv-001",
+    academyId: "ac-1",
+    academyName: "Gracie Barra Barra da Tijuca",
+    unit: "Matriz - Rio de Janeiro",
+    ownerName: "Mestre Carlos Gracie Jr.",
+    ownerPhone: "+55 (21) 98888-1122",
+    ownerEmail: "diretoria@graciebarra.com.br",
+    invoiceMonth: "Agosto/2026",
+    activeStudentsCount: 145,
+    fixedFee: 130.00,
+    perStudentFee: 1.30,
+    variableAmount: 188.50,
+    amount: 318.50,
+    dueDate: "2026-09-10",
+    paymentDate: "2026-08-25T14:30:00Z",
+    status: "PAID",
+    billingType: "PIX",
+    pixCopiaECola: "00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-0015204000053039865802BR5919BJJ ACADEMY SAAS6009SAO PAULO62070503***6304E8A1",
+    pixQrCodeUrl: "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-001",
+    pdfUrl: "https://bjjacademy.app.br/invoices/saas-inv-001.pdf",
+    bankSlipUrl: "https://bjjacademy.app.br/boletos/saas-inv-001",
+    asaasInvoiceId: "pay_saas_gracie_881902",
+    lastSentAt: "2026-08-20T10:00:00Z",
+    sentChannel: "WHATSAPP",
+    notes: "Pagamento confirmado via PIX Asaas automático."
+  },
+  {
+    id: "saas-inv-002",
+    academyId: "ac-2",
+    academyName: "Alliance São Paulo",
+    unit: "São Paulo - Itaim Bibi",
+    ownerName: "Mestre Fabio Gurgel",
+    ownerPhone: "+55 (11) 97777-3344",
+    ownerEmail: "financeiro@alliancebjj.com.br",
+    invoiceMonth: "Agosto/2026",
+    activeStudentsCount: 112,
+    fixedFee: 130.00,
+    perStudentFee: 1.30,
+    variableAmount: 145.60,
+    amount: 275.60,
+    dueDate: "2026-09-10",
+    status: "PENDING",
+    billingType: "PIX",
+    pixCopiaECola: "00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-0025204000053039865802BR5919BJJ ACADEMY SAAS6009SAO PAULO62070503***6304C92B",
+    pixQrCodeUrl: "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-002",
+    pdfUrl: "https://bjjacademy.app.br/invoices/saas-inv-002.pdf",
+    bankSlipUrl: "https://bjjacademy.app.br/boletos/saas-inv-002",
+    asaasInvoiceId: "pay_saas_alliance_992104",
+    lastSentAt: "2026-08-24T09:15:00Z",
+    sentChannel: "WHATSAPP",
+    notes: "Aguardando pagamento até o dia 10."
+  },
+  {
+    id: "saas-inv-003",
+    academyId: "ac-3",
+    academyName: "Atos BJJ San Diego",
+    unit: "California - Headquarters",
+    ownerName: "Mestre André Galvão",
+    ownerPhone: "+1 (619) 555-0199",
+    ownerEmail: "admin@atosjiujitsuhq.com",
+    invoiceMonth: "Agosto/2026",
+    activeStudentsCount: 89,
+    fixedFee: 130.00,
+    perStudentFee: 1.30,
+    variableAmount: 115.70,
+    amount: 245.70,
+    dueDate: "2026-09-10",
+    paymentDate: "2026-08-22T18:10:00Z",
+    status: "PAID",
+    billingType: "CREDIT_CARD",
+    pdfUrl: "https://bjjacademy.app.br/invoices/saas-inv-003.pdf",
+    asaasInvoiceId: "pay_saas_atos_110293",
+    lastSentAt: "2026-08-20T10:00:00Z",
+    sentChannel: "EMAIL",
+    notes: "Cobrança internacional debitada no cartão."
+  },
+  {
+    id: "saas-inv-004",
+    academyId: "ac-4",
+    academyName: "Loyalty Jiu-Jitsu",
+    unit: "Matriz - São Paulo",
+    ownerName: "Prof. Roberto Mendes",
+    ownerPhone: "+55 (11) 97123-9988",
+    ownerEmail: "roberto@layoutjiujitsu.com.br",
+    invoiceMonth: "Agosto/2026",
+    activeStudentsCount: 128,
+    fixedFee: 130.00,
+    perStudentFee: 1.30,
+    variableAmount: 166.40,
+    amount: 296.40,
+    dueDate: "2026-09-10",
+    status: "PENDING",
+    billingType: "PIX",
+    pixCopiaECola: "00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-0045204000053039865802BR5919BJJ ACADEMY SAAS6009SAO PAULO62070503***6304771A",
+    pixQrCodeUrl: "https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=00020126580014br.gov.bcb.pix0136bjjacademy-saas-inv-004",
+    pdfUrl: "https://bjjacademy.app.br/invoices/saas-inv-004.pdf",
+    bankSlipUrl: "https://bjjacademy.app.br/boletos/saas-inv-004",
+    asaasInvoiceId: "pay_saas_loyalty_774129",
+    lastSentAt: "2026-08-25T11:00:00Z",
+    sentChannel: "WHATSAPP",
+    notes: "Cobrança enviada via WhatsApp do gestor."
+  }
+];
+
+// GET /api/saas-billing/overview - Master Dashboard Overview (SUPER_ADMIN ONLY)
+app.get("/api/saas-billing/overview", requireSuperAdmin, (req, res) => {
+  const totalAcademies = saasPlatformInvoices.length;
+  const activeAcademies = saasPlatformInvoices.length;
+  const totalActiveStudents = saasPlatformInvoices.reduce((acc, inv) => acc + inv.activeStudentsCount, 0);
+  
+  const projectedRevenue = saasPlatformInvoices.reduce((acc, inv) => acc + inv.amount, 0);
+  const receivedRevenue = saasPlatformInvoices.filter(i => i.status === "PAID").reduce((acc, inv) => acc + inv.amount, 0);
+  const pendingRevenue = saasPlatformInvoices.filter(i => i.status === "PENDING").reduce((acc, inv) => acc + inv.amount, 0);
+  const overdueRevenue = saasPlatformInvoices.filter(i => i.status === "OVERDUE").reduce((acc, inv) => acc + inv.amount, 0);
+
+  res.json({
+    success: true,
+    data: {
+      totalAcademies,
+      activeAcademies,
+      totalActiveStudents,
+      fixedFeeUnit: 130.00,
+      perStudentFeeUnit: 1.30,
+      projectedRevenue: Math.round(projectedRevenue * 100) / 100,
+      receivedRevenue: Math.round(receivedRevenue * 100) / 100,
+      pendingRevenue: Math.round(pendingRevenue * 100) / 100,
+      overdueRevenue: Math.round(overdueRevenue * 100) / 100,
+      billingMonth: "Agosto/2026",
+      invoices: saasPlatformInvoices
+    }
+  });
+});
+
+// GET /api/saas-billing/invoices - List All Invoices (SUPER_ADMIN ONLY)
+app.get("/api/saas-billing/invoices", requireSuperAdmin, (req, res) => {
+  res.json({
+    success: true,
+    invoices: saasPlatformInvoices
+  });
+});
+
+// POST /api/saas-billing/invoices/generate - Recalculate / Generate New Invoice (SUPER_ADMIN ONLY)
+app.post("/api/saas-billing/invoices/generate", requireSuperAdmin, (req, res) => {
+  const { academyId, academyName, unit, activeStudentsCount = 0, ownerName, ownerPhone, ownerEmail, invoiceMonth = "Agosto/2026", dueDate = "2026-09-10" } = req.body;
+  
+  const count = parseInt(activeStudentsCount) || 0;
+  const fixedFee = 130.00;
+  const perStudentFee = 1.30;
+  const variableAmount = Math.round(count * perStudentFee * 100) / 100;
+  const amount = Math.round((fixedFee + variableAmount) * 100) / 100;
+
+  const existingIndex = saasPlatformInvoices.findIndex(inv => inv.academyId === academyId && inv.invoiceMonth === invoiceMonth);
+  
+  const newInvoice = {
+    id: existingIndex >= 0 ? saasPlatformInvoices[existingIndex].id : `saas-inv-${Date.now()}`,
+    academyId,
+    academyName: academyName || (existingIndex >= 0 ? saasPlatformInvoices[existingIndex].academyName : "Academia Contratante"),
+    unit: unit || (existingIndex >= 0 ? saasPlatformInvoices[existingIndex].unit : "Unidade Matriz"),
+    ownerName: ownerName || (existingIndex >= 0 ? saasPlatformInvoices[existingIndex].ownerName : "Mestre / Gestor"),
+    ownerPhone: ownerPhone || (existingIndex >= 0 ? saasPlatformInvoices[existingIndex].ownerPhone : "+55 11 99999-0000"),
+    ownerEmail: ownerEmail || (existingIndex >= 0 ? saasPlatformInvoices[existingIndex].ownerEmail : "contato@academia.com.br"),
+    invoiceMonth,
+    activeStudentsCount: count,
+    fixedFee,
+    perStudentFee,
+    variableAmount,
+    amount,
+    dueDate,
+    status: existingIndex >= 0 ? saasPlatformInvoices[existingIndex].status : "PENDING",
+    billingType: "PIX",
+    pixCopiaECola: `00020126580014br.gov.bcb.pix0136bjjacademy-${academyId}-${Date.now().toString(36)}5204000053039865802BR5919BJJ ACADEMY SAAS6009SAO PAULO62070503***6304${Math.random().toString(16).substring(2, 6).toUpperCase()}`,
+    pixQrCodeUrl: `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=00020126580014br.gov.bcb.pix0136bjjacademy-${academyId}`,
+    pdfUrl: `https://bjjacademy.app.br/invoices/${academyId}.pdf`,
+    notes: `Fatura gerada automaticamente: R$ 130,00 fixo + (${count} alunos × R$ 1,30 = R$ ${variableAmount.toFixed(2)})`
+  };
+
+  if (existingIndex >= 0) {
+    saasPlatformInvoices[existingIndex] = newInvoice as any;
+  } else {
+    saasPlatformInvoices.unshift(newInvoice as any);
+  }
+
+  res.json({
+    success: true,
+    message: "Fatura SaaS recalculada com sucesso!",
+    invoice: newInvoice
+  });
+});
+
+// POST /api/saas-billing/invoices/:id/send - Dispatch Invoice Notification to Academy (SUPER_ADMIN ONLY)
+app.post("/api/saas-billing/invoices/:id/send", requireSuperAdmin, (req, res) => {
+  const { id } = req.params;
+  const { channel = "WHATSAPP", customPhone, customEmail } = req.body;
+  
+  const invoice = saasPlatformInvoices.find(inv => inv.id === id);
+  if (!invoice) {
+    return res.status(404).json({ success: false, error: "Fatura não encontrada" });
+  }
+
+  invoice.lastSentAt = new Date().toISOString();
+  invoice.sentChannel = channel;
+
+  const targetPhone = customPhone || invoice.ownerPhone || "+55 11 99999-0000";
+  const targetEmail = customEmail || invoice.ownerEmail || "contato@academia.com.br";
+
+  const messageText = `🥋 *BJJ Academy — Fatura Mensal da Plataforma*\nOlá, *${invoice.ownerName || invoice.academyName}*!\nSua fatura de *${invoice.invoiceMonth}* está pronta:\n• Taxa Fixa: R$ 130,00\n• Alunos (${invoice.activeStudentsCount} × R$ 1,30): R$ ${invoice.variableAmount.toFixed(2)}\n• *TOTAL: R$ ${invoice.amount.toFixed(2)}*\n• Vencimento: ${invoice.dueDate}\nLink PIX: ${invoice.pixCopiaECola || 'https://bjjacademy.app.br/pagar/' + invoice.id}`;
+
+  res.json({
+    success: true,
+    message: `Cobrança enviada com sucesso para ${invoice.academyName} via ${channel}!`,
+    dispatchedTo: channel === "WHATSAPP" ? targetPhone : targetEmail,
+    channel,
+    timestamp: invoice.lastSentAt,
+    previewMessage: messageText
+  });
+});
+
+// PATCH /api/saas-billing/invoices/:id/status - Update Status (SUPER_ADMIN ONLY)
+app.patch("/api/saas-billing/invoices/:id/status", requireSuperAdmin, (req, res) => {
+  const { id } = req.params;
+  const { status, notes } = req.body;
+
+  const invoice = saasPlatformInvoices.find(inv => inv.id === id);
+  if (!invoice) {
+    return res.status(404).json({ success: false, error: "Fatura não encontrada" });
+  }
+
+  invoice.status = status;
+  if (status === "PAID" && !invoice.paymentDate) {
+    invoice.paymentDate = new Date().toISOString();
+  }
+  if (notes) {
+    invoice.notes = notes;
+  }
+
+  res.json({
+    success: true,
+    message: `Status da fatura ${id} atualizado para ${status}`,
+    invoice
+  });
+});
+
+// GET /api/saas-billing/my-subscription/:academyId - Get Academy's Own Subscription (TENANT ISOLATED)
+app.get("/api/saas-billing/my-subscription/:academyId", requireSameAcademyOrSuperAdmin("academyId"), (req, res) => {
+  const { academyId } = req.params;
+  const invoice = saasPlatformInvoices.find(inv => inv.academyId === academyId);
+
+  if (!invoice) {
+    // Generate default on the fly
+    return res.json({
+      success: true,
+      academyId,
+      subscription: {
+        planName: "BJJ Academy Pro",
+        fixedFee: 130.00,
+        perStudentFee: 1.30,
+        currentInvoice: {
+          id: `saas-inv-${academyId}`,
+          invoiceMonth: "Agosto/2026",
+          activeStudentsCount: 100,
+          fixedFee: 130.00,
+          variableAmount: 130.00,
+          amount: 260.00,
+          dueDate: "2026-09-10",
+          status: "PENDING",
+          pixCopiaECola: "00020126580014br.gov.bcb.pix0136bjjacademy-my-sub5204000053039865802BR5919BJJ ACADEMY6009SAO PAULO62070503***6304D1A0"
+        }
+      }
+    });
+  }
+
+  // Tenant only sees their own invoice without global platform margins
+  res.json({
+    success: true,
+    academyId,
+    subscription: {
+      planName: "BJJ Academy Pro",
+      fixedFee: invoice.fixedFee,
+      perStudentFee: invoice.perStudentFee,
+      currentInvoice: invoice
+    }
   });
 });
 
